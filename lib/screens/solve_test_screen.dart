@@ -1,9 +1,8 @@
-import 'dart:convert';
-
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
+import 'analysis_service.dart';
 
 class SolveTestScreen extends StatefulWidget {
   const SolveTestScreen({super.key});
@@ -13,226 +12,231 @@ class SolveTestScreen extends StatefulWidget {
 }
 
 class _SolveTestScreenState extends State<SolveTestScreen> {
-  final Map<int, String> _answers = {};
-  bool _saving = false;
-  String? _error;
-  String? _aiResult;
+  bool _initialized = false;
+  String? _loadError;
 
-  // 🔥 GEMINI API İSTEĞİ
-  Future<String?> _generateAiAnalysis({
-    required String testTitle,
-    required List<String> answers,
-  }) async {
-    // BURAYA KENDİ GEMINI API KEY'İNİ YAZ
-    const apiKey = 'AIzaSyBRRUdVYG08zfejt8wYn9eVxrn-jgO0Ogw';
+  late String _testId;
+  late String _title;
+  late String _description;
+  late String _answerType;
+  late List<String> _questions;
 
-    final uri = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey',
-    );
+  late List<int?> _scaleAnswers;
+  late List<TextEditingController> _textCtrls;
 
-    final buffer = StringBuffer();
-    for (var i = 0; i < answers.length; i++) {
-      buffer.writeln('Soru ${i + 1} cevabı: ${answers[i]}');
+  bool _submitting = false;
+  String? _submitError;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_initialized) return;
+
+    final args =
+    ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+
+    if (args == null) {
+      _loadError = 'Test bilgisi bulunamadı.';
+      _questions = [];
+      _answerType = 'scale';
+      _initialized = true;
+      return;
     }
 
-    final prompt = '''
-Ben bir psikolog değilim, sadece yardımcı bir yapay zekâ modeliyim.
-Aşağıdaki test cevaplarını yumuşak ve destekleyici bir dille yorumla.
+    _testId = args['id']?.toString() ?? '';
+    _title = args['title']?.toString() ?? 'Test';
+    _description = args['description']?.toString() ?? '';
+    _answerType = (args['answerType'] ?? 'scale').toString();
+    final qRaw = args['questions'] as List<dynamic>? ?? [];
+    _questions = qRaw.map((e) => e.toString()).toList();
 
-Test başlığı: $testTitle
+    _scaleAnswers = List<int?>.filled(_questions.length, null);
+    _textCtrls =
+        List.generate(_questions.length, (_) => TextEditingController());
 
-Kullanıcının yanıtları:
-${buffer.toString()}
-
-Şu başlıklarla cevap ver:
-- Genel duygu durumu
-- Güçlü yönler
-- Dikkat edilmesi gereken noktalar (teşhis koyma, sadece gözlem)
-- Öneriler (gerekirse profesyonel destek almaya teşvik edebilirsin)
-''';
-
-    final body = {
-      "contents": [
-        {
-          "parts": [
-            {"text": prompt}
-          ]
-        }
-      ]
-    };
-
-    try {
-      final resp = await http.post(
-        uri,
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode(body),
-      );
-
-      if (resp.statusCode != 200) {
-        debugPrint(
-            'Gemini hatası (${resp.statusCode}): ${resp.body.toString()}');
-        return null;
-      }
-
-      final data = jsonDecode(resp.body);
-      final textResponse = data['candidates']?[0]?['content']?['parts']?[0]
-      ?['text']
-          ?.toString();
-
-      return textResponse;
-    } catch (e) {
-      debugPrint('Gemini isteği sırasında hata: $e');
-      return null;
-    }
+    _initialized = true;
   }
 
-  Future<void> _submit(Map<String, dynamic> testData) async {
-    setState(() {
-      _saving = true;
-      _error = null;
-      _aiResult = null;
-    });
+  @override
+  void dispose() {
+    for (final c in _textCtrls) {
+      c.dispose();
+    }
+    super.dispose();
+  }
 
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
+  Future<void> _submit() async {
+    if (_submitting) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() {
+        _submitError = 'Oturum bulunamadı. Lütfen tekrar giriş yapın.';
+      });
+      return;
+    }
+
+    // Cevapları doğrula
+    List<dynamic> answers;
+    if (_answerType == 'scale') {
+      if (_scaleAnswers.any((e) => e == null)) {
         setState(() {
-          _error = 'Oturum bulunamadı.';
+          _submitError = 'Lütfen tüm sorular için 1–5 arasında bir yanıt seçin.';
         });
         return;
       }
+      answers = _scaleAnswers.map((e) => e ?? 0).toList();
+    } else {
+      final texts = _textCtrls.map((c) => c.text.trim()).toList();
+      if (texts.any((t) => t.isEmpty)) {
+        setState(() {
+          _submitError = 'Lütfen tüm sorular için bir yanıt yazın.';
+        });
+        return;
+      }
+      answers = texts;
+    }
 
-      final questions = (testData['questions'] ?? []) as List<dynamic>;
-      final answerType = testData['answerType']?.toString() ?? 'scale';
+    setState(() {
+      _submitError = null;
+      _submitting = true;
+    });
 
-      // cevapları listeye çevir
-      final answersList = List<String>.generate(
-        questions.length,
-            (index) => _answers[index] ?? '',
-      );
+    try {
+      // AI için prompt hazırla
+      final buffer = StringBuffer();
+      buffer.writeln('Psikolojik test: $_title');
+      buffer.writeln('Test açıklaması: $_description');
+      buffer.writeln('Cevap tipi: $_answerType');
+      for (var i = 0; i < _questions.length; i++) {
+        buffer.writeln('Soru ${i + 1}: ${_questions[i]}');
+        buffer.writeln('Cevap: ${answers[i]}');
+      }
 
-      // önce Firestore'a kaydet
-      final resultRef = await FirebaseFirestore.instance
-          .collection('test_results')
-          .add({
+      final aiText =
+      await AnalysisService.generateAnalysis(buffer.toString());
+
+      final docRef =
+      FirebaseFirestore.instance.collection('solvedTests').doc();
+
+      final payload = {
+        'id': docRef.id,
+        'testId': _testId,
+        'testTitle': _title,
         'userId': user.uid,
-        'testId': testData['id'],
-        'testTitle': testData['title'],
-        'questions': questions,
-        'answers': answersList,
-        'answerType': answerType,
+        'answers': answers,
+        'questions': _questions,
+        'answerType': _answerType,
+        'aiAnalysis': aiText,
         'createdAt': FieldValue.serverTimestamp(),
-      });
+      };
 
-      // sonra AI analizi al
-      final aiText = await _generateAiAnalysis(
-        testTitle: (testData['title'] ?? '').toString(),
-        answers: answersList,
+      await docRef.set(payload);
+
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(
+        context,
+        '/resultDetail',
+        arguments: payload,
       );
-
-      final cleaned = (aiText ?? '').trim();
-
-      // sonucu Firestore'da güncelle
-      await resultRef.update({
-        'aiAnalysis': cleaned,
-      });
-
-      setState(() {
-        _aiResult = cleaned;
-      });
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _submitError = 'Sonuç kaydedilirken hata oluştu: $e';
       });
     } finally {
-      setState(() => _saving = false);
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final args =
-    ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
-
-    if (args == null) {
+    if (!_initialized) {
       return const Scaffold(
-        body: Center(
-          child: Text('Test verisi bulunamadı. Lütfen tekrar deneyin.'),
-        ),
+        body: Center(child: CircularProgressIndicator()),
       );
     }
 
-    final testData = args;
-    final questions = (testData['questions'] ?? []) as List<dynamic>;
-    final answerType = testData['answerType']?.toString() ?? 'scale';
+    if (_loadError != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Test Çöz')),
+        body: Center(child: Text(_loadError!)),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(testData['title']?.toString() ?? 'Test Çöz'),
+        title: Text(_title),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            if (testData['description'] != null &&
-                testData['description'].toString().isNotEmpty) ...[
+            if (_description.isNotEmpty) ...[
               Text(
-                testData['description'],
-                style: const TextStyle(fontSize: 16),
+                _description,
+                textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
             ],
+            Text(
+              _answerType == 'scale'
+                  ? 'Lütfen her soru için 1 (çok olumsuz) ile 5 (çok olumlu) arasında bir puan seçin.'
+                  : 'Lütfen her soru için kısa bir yanıt yazın.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: questions.length,
+              itemCount: _questions.length,
               itemBuilder: (context, index) {
-                final q = questions[index].toString();
-                final number = index + 1;
-
+                final soru = _questions[index];
                 return Card(
-                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  margin: const EdgeInsets.only(bottom: 12),
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Soru $number: $q',
+                          'Soru ${index + 1}',
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 16,
                           ),
                         ),
-                        const SizedBox(height: 8),
-
-                        // CEVAP TİPİNE GÖRE INPUT
-                        if (answerType == 'text')
-                          TextField(
-                            decoration: const InputDecoration(
-                              labelText: 'Cevabın',
-                              border: OutlineInputBorder(),
-                            ),
-                            onChanged: (v) {
-                              _answers[index] = v;
-                            },
-                          )
-                        else
-                          Wrap(
-                            spacing: 8,
+                        const SizedBox(height: 4),
+                        Text(soru),
+                        const SizedBox(height: 12),
+                        if (_answerType == 'scale')
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: List.generate(5, (i) {
-                              final value = (i + 1).toString();
-                              final selected = _answers[index] == value;
+                              final value = i + 1;
+                              final selected =
+                                  _scaleAnswers[index] == value;
                               return ChoiceChip(
-                                label: Text(value),
+                                label: Text('$value'),
                                 selected: selected,
-                                onSelected: (sel) {
+                                onSelected: (_) {
                                   setState(() {
-                                    _answers[index] = value;
+                                    _scaleAnswers[index] = value;
                                   });
                                 },
                               );
                             }),
+                          )
+                        else
+                          TextField(
+                            controller: _textCtrls[index],
+                            maxLines: 2,
+                            decoration: const InputDecoration(
+                              labelText: 'Cevabın',
+                              border: OutlineInputBorder(),
+                            ),
                           ),
                       ],
                     ),
@@ -240,34 +244,26 @@ ${buffer.toString()}
                 );
               },
             ),
-            const SizedBox(height: 12),
-            if (_error != null)
+            const SizedBox(height: 16),
+            if (_submitError != null)
               Text(
-                _error!,
+                _submitError!,
                 style: const TextStyle(color: Colors.red),
               ),
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _saving ? null : () => _submit(testData),
-                child: _saving
-                    ? const CircularProgressIndicator()
-                    : const Text('Testi Gönder (AI Analizli)'),
+                onPressed: _submitting ? null : _submit,
+                child: _submitting
+                    ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+                    : const Text('Gönder'),
               ),
             ),
-            const SizedBox(height: 16),
-            if (_aiResult != null && _aiResult!.isNotEmpty)
-              Card(
-                color: Colors.purple.shade50,
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    _aiResult!,
-                    style: const TextStyle(fontSize: 14),
-                  ),
-                ),
-              ),
           ],
         ),
       ),

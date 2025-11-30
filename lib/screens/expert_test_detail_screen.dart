@@ -1,47 +1,39 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 
 class ExpertTestDetailScreen extends StatelessWidget {
-  const ExpertTestDetailScreen({super.key});
+  final String testId;
+
+  const ExpertTestDetailScreen({super.key, required this.testId});
 
   @override
   Widget build(BuildContext context) {
-    // main.dart üzerinden Navigator.pushNamed ile
-    // gönderdiğimiz testId burada arguments olarak geliyor
-    final testId = ModalRoute.of(context)!.settings.arguments as String;
+    final docRef =
+    FirebaseFirestore.instance.collection('tests').doc(testId);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Test Detayı"),
-      ),
-      body: FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        future: FirebaseFirestore.instance
-            .collection('tests')
-            .doc(testId)
-            .get(),
+      appBar: AppBar(title: const Text('Test Detayı')),
+      body: FutureBuilder<DocumentSnapshot>(
+        future: docRef.get(),
         builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(child: Text('Hata: ${snapshot.error}'));
+          }
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
-          if (snapshot.hasError) {
-            return Center(
-              child: Text(
-                'Hata: ${snapshot.error}',
-                style: const TextStyle(color: Colors.red),
-              ),
-            );
-          }
-
           if (!snapshot.hasData || !snapshot.data!.exists) {
-            return const Center(child: Text("Test bulunamadı."));
+            return const Center(child: Text('Test bulunamadı.'));
           }
 
-          final data = snapshot.data!.data()!;
-          final title = data['title']?.toString() ?? 'Başlık yok';
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+          final title = data['title']?.toString() ?? '';
           final description = data['description']?.toString() ?? '';
-          final questionsDynamic = (data['questions'] ?? []) as List<dynamic>;
-          final questions = questionsDynamic.map((e) => e.toString()).toList();
+          final questions =
+          (data['questions'] as List<dynamic>? ?? [])
+              .map((e) => e.toString())
+              .toList();
+          final answerType = data['answerType']?.toString() ?? 'scale';
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -51,41 +43,34 @@ class ExpertTestDetailScreen extends StatelessWidget {
                 Text(
                   title,
                   style: const TextStyle(
-                    fontSize: 22,
+                    fontSize: 20,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 8),
-                if (description.isNotEmpty)
-                  Text(
-                    description,
-                    style: const TextStyle(fontSize: 16),
-                  ),
-                if (description.isNotEmpty) const SizedBox(height: 16),
+                if (description.isNotEmpty) ...[
+                  Text(description),
+                  const SizedBox(height: 16),
+                ],
+                Text(
+                  answerType == 'scale'
+                      ? 'Cevap tipi: 1–5 ölçek'
+                      : 'Cevap tipi: Metin',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 16),
                 const Text(
-                  "Sorular",
+                  'Sorular',
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 8),
-                if (questions.isEmpty)
-                  const Text("Bu test için soru bulunmuyor."),
-                if (questions.isNotEmpty)
-                  ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: questions.length,
-                    separatorBuilder: (_, __) => const Divider(),
-                    itemBuilder: (context, index) {
-                      return ListTile(
-                        leading: CircleAvatar(
-                          child: Text('${index + 1}'),
-                        ),
-                        title: Text(questions[index]),
-                      );
-                    },
+                for (var i = 0; i < questions.length; i++)
+                  ListTile(
+                    leading: CircleAvatar(child: Text('${i + 1}')),
+                    title: Text(questions[i]),
                   ),
               ],
             ),

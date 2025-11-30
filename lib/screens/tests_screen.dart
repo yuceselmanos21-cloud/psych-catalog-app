@@ -21,11 +21,13 @@ class TestsScreen extends StatelessWidget {
               child: Text('Testler yüklenirken hata oluştu.'),
             );
           }
+
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
 
           final docs = snapshot.data!.docs;
+
           if (docs.isEmpty) {
             return const Center(child: Text('Henüz test bulunmuyor.'));
           }
@@ -34,31 +36,23 @@ class TestsScreen extends StatelessWidget {
             itemCount: docs.length,
             itemBuilder: (context, index) {
               final doc = docs[index];
-              final data = doc.data() as Map<String, dynamic>;
-              final title = data['title']?.toString() ?? 'Başlıksız';
-              final desc = data['description']?.toString() ?? '';
-              final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+              final data = doc.data() as Map<String, dynamic>? ?? {};
+
+              final title = data['title']?.toString() ?? 'İsimsiz Test';
+              final description =
+                  data['description']?.toString() ?? 'Açıklama yok';
+              final answerType = data['answerType']?.toString() ?? 'scale';
+              final questions = List<String>.from(data['questions'] ?? []);
 
               return Card(
                 margin:
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 child: ListTile(
                   title: Text(title),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (desc.isNotEmpty)
-                        Text(
-                          desc,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      if (createdAt != null)
-                        Text(
-                          'Oluşturulma: $createdAt',
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                    ],
+                  subtitle: Text(
+                    description,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
@@ -68,9 +62,9 @@ class TestsScreen extends StatelessWidget {
                       arguments: {
                         'id': doc.id,
                         'title': title,
-                        'description': desc,
-                        'questions': data['questions'] ?? <dynamic>[],
-                        'answerType': data['answerType'] ?? 'scale', // <-- EKLEDİK
+                        'description': description,
+                        'questions': questions,
+                        'answerType': answerType,
                       },
                     );
                   },

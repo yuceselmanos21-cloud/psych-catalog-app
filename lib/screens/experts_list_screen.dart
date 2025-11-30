@@ -1,63 +1,52 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 
 class ExpertsListScreen extends StatelessWidget {
   const ExpertsListScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final expertsQuery = FirebaseFirestore.instance
+        .collection('users')
+        .where('role', isEqualTo: 'expert');
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Uzmanları Keşfet')),
+      appBar: AppBar(
+        title: const Text('Uzmanlar'),
+      ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('users')
-            .where('role', isEqualTo: 'expert')
-            .snapshots(),
+        stream: expertsQuery.snapshots(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return const Center(child: Text('Uzmanlar yüklenirken hata oluştu.'));
           }
-          if (!snapshot.hasData) {
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
           final docs = snapshot.data!.docs;
           if (docs.isEmpty) {
-            return const Center(
-              child: Text('Henüz kayıtlı uzman yok.'),
-            );
+            return const Center(child: Text('Kayıtlı uzman bulunamadı.'));
           }
 
           return ListView.builder(
             itemCount: docs.length,
             itemBuilder: (context, index) {
-              final data = docs[index].data() as Map<String, dynamic>;
-              final name = data['name'] ?? 'İsimsiz';
-              final email = data['email'] ?? '';
-              final spec = data['specialization'] ?? '';
-              final city = data['city'] ?? '';
+              final doc = docs[index];
+              final data = doc.data() as Map<String, dynamic>;
 
-              final subtitleParts = <String>[];
-              if (spec.toString().isNotEmpty) subtitleParts.add(spec);
-              if (city.toString().isNotEmpty) subtitleParts.add(city);
+              final name = data['name']?.toString() ?? 'İsimsiz';
+              final city = data['city']?.toString() ?? 'Şehir belirtilmemiş';
+              final profession =
+                  data['profession']?.toString() ?? 'Meslek belirtilmemiş';
+              final specialization =
+                  data['specialization']?.toString() ?? 'Uzmanlık belirtilmemiş';
 
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: ListTile(
-                  title: Text(name),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (subtitleParts.isNotEmpty)
-                        Text(subtitleParts.join(' • ')),
-                      if (email.toString().isNotEmpty)
-                        Text(
-                          email,
-                          style: const TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                    ],
-                  ),
-                ),
+              return ListTile(
+                title: Text(name),
+                subtitle: Text('$profession • $specialization\n$city'),
+                isThreeLine: true,
               );
             },
           );

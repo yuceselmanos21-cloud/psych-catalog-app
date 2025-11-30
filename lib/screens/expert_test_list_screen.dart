@@ -1,104 +1,105 @@
-import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
+import 'expert_test_detail_screen.dart';
 
 class ExpertTestListScreen extends StatelessWidget {
   const ExpertTestListScreen({super.key});
 
-  Future<List<Map<String, dynamic>>> _loadTests() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return [];
-
-    try {
-      final snap = await FirebaseFirestore.instance
-          .collection('tests')
-          .where('createdBy', isEqualTo: user.uid)
-      // .orderBy('createdAt', descending: true)  // ŞİMDİLİK KALDIRDIK
-          .get();
-
-      return snap.docs.map((d) {
-        final data = d.data();
-        data['id'] = d.id;
-        return data;
-      }).toList();
-    } catch (e) {
-      throw Exception('Testler yüklenirken hata oluştu: $e');
-    }
-  }
-
-  Future<void> _deleteTest(String id) async {
-    await FirebaseFirestore.instance.collection('tests').doc(id).delete();
-  }
-
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return const Scaffold(
+        body: Center(child: Text('Devam etmek için lütfen giriş yapın.')),
+      );
+    }
+
+    final stream = FirebaseFirestore.instance
+        .collection('tests')
+        .where('createdBy', isEqualTo: user.uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+
+    Future<void> deleteTest(String testId) async {
+      await FirebaseFirestore.instance.collection('tests').doc(testId).delete();
+    }
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Oluşturduğum Testler"),
-      ),
-      body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _loadTests(),
+      appBar: AppBar(title: const Text('Oluşturduğum Testler')),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: stream,
         builder: (context, snapshot) {
-          // 1) Yükleniyor
+          if (snapshot.hasError) {
+            return Center(
+              child: Text(
+                'Testler yüklenirken hata oluştu.\n${snapshot.error}',
+                textAlign: TextAlign.center,
+              ),
+            );
+          }
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          // 2) Hata
-          if (snapshot.hasError) {
-            return Center(
-              child: Text(
-                'Hata: ${snapshot.error}',
-                style: const TextStyle(color: Colors.red),
-              ),
-            );
+          final docs = snapshot.data!.docs;
+          if (docs.isEmpty) {
+            return const Center(child: Text('Henüz test oluşturmamışsınız.'));
           }
 
-          if (!snapshot.hasData) {
-            return const Center(child: Text('Veri bulunamadı.'));
-          }
+          return ListView.separated(
+            itemCount: docs.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final doc = docs[index];
+              final data = doc.data() as Map<String, dynamic>;
+              final title = data['title']?.toString() ?? 'Başlıksız test';
+              final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
 
-          final tests = snapshot.data!;
-          if (tests.isEmpty) {
-            return const Center(
-              child: Text("Henüz test oluşturmadınız."),
-            );
-          }
-
-          // 3) Liste
-          return ListView.builder(
-            itemCount: tests.length,
-            itemBuilder: (context, i) {
-              final test = tests[i];
-              return Card(
-                margin: const EdgeInsets.all(8),
-                child: ListTile(
-                  title: Text(test['title'] ?? 'Başlık yok'),
-                  subtitle: Text(
-                    (test['description'] ?? 'Açıklama yok.').toString(),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: () {
-                    Navigator.pushNamed(
-                      context,
-                      '/expertTestDetail',
-                      arguments: test['id'],  // az önce eklediğimiz id
-                    );
+              return ListTile(
+                title: Text(title),
+                subtitle: createdAt != null
+                    ? Text('Oluşturulma: $createdAt')
+                    : null,
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () async {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (_) => AlertDialog(
+                        title: const Text('Testi sil'),
+                        content: const Text(
+                            'Bu testi silmek istediğinizden emin misiniz?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.of(context).pop(false),
+                            child: const Text('Vazgeç'),
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.of(context).pop(true),
+                            child: const Text('Sil'),
+                          ),
+                        ],
+                      ),
+                    ) ??
+                        false;
+                    if (ok) {
+                      await deleteTest(doc.id);
+                    }
                   },
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () async {
-                      await _deleteTest(test['id']);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Test silindi")),
-                      );
-                      (context as Element).reassemble();
-                    },
-                  ),
                 ),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ExpertTestDetailScreen(testId: doc.id),
+                    ),
+                  );
+                },
               );
-
             },
           );
         },
