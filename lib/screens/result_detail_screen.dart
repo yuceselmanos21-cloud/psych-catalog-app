@@ -2,32 +2,59 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 class ResultDetailScreen extends StatelessWidget {
-  const ResultDetailScreen({super.key});
+  // Eğer çözülen testler listesinden geliyorsak arguments kullanıyoruz
+  final bool fromArguments;
+
+  // Eğer SolveTestScreen içinden direkt geliyorsak, burada dolu geliyor
+  final String? testTitle;
+  final List<String>? answers;
+  final List<String>? questions;
+  final DateTime? solvedAt;
+  final String? aiAnalysis;
+
+  const ResultDetailScreen({
+    super.key,
+    this.fromArguments = true,
+    this.testTitle,
+    this.answers,
+    this.questions,
+    this.solvedAt,
+    this.aiAnalysis,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final args =
-    ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    // 1) Eğer fromArguments true ise, Navigator.pushNamed ile gelen argümanları al
+    String title = testTitle ?? 'Test Sonucu';
+    List<String> localAnswers = answers ?? [];
+    List<String> localQuestions = questions ?? [];
+    DateTime? localSolvedAt = solvedAt;
+    String localAnalysis = aiAnalysis ?? '';
 
-    if (args == null) {
-      return const Scaffold(
-        body: Center(child: Text('Sonuç bilgisi bulunamadı.')),
-      );
+    if (fromArguments) {
+      final args =
+      ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+
+      if (args == null) {
+        return const Scaffold(
+          body: Center(child: Text('Sonuç bilgisi bulunamadı.')),
+        );
+      }
+
+      title = args['testTitle']?.toString() ?? 'Test Sonucu';
+
+      final answersRaw = List<dynamic>.from(args['answers'] ?? <dynamic>[]);
+      final questionsRaw =
+      List<dynamic>.from(args['questions'] ?? <dynamic>[]);
+
+      localAnswers = answersRaw.map((e) => e.toString()).toList();
+      localQuestions = questionsRaw.map((e) => e.toString()).toList();
+
+      final Timestamp? ts = args['createdAt'] as Timestamp?;
+      localSolvedAt = ts?.toDate();
+
+      localAnalysis = args['aiAnalysis']?.toString() ?? '';
     }
-
-    final String testTitle = args['testTitle']?.toString() ?? 'Test Sonucu';
-    final List<dynamic> answersRaw =
-    List<dynamic>.from(args['answers'] ?? <dynamic>[]);
-    final List<dynamic> questionsRaw =
-    List<dynamic>.from(args['questions'] ?? <dynamic>[]);
-    final Timestamp? ts = args['createdAt'] as Timestamp?;
-    final String aiAnalysis = args['aiAnalysis']?.toString() ?? '';
-
-    final DateTime? solvedAt = ts?.toDate();
-
-    // Cevapları stringe çevir
-    final answers = answersRaw.map((e) => e.toString()).toList();
-    final questions = questionsRaw.map((e) => e.toString()).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -40,7 +67,7 @@ class ResultDetailScreen extends StatelessWidget {
           children: [
             // Başlık
             Text(
-              testTitle,
+              title,
               style: const TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
@@ -48,16 +75,16 @@ class ResultDetailScreen extends StatelessWidget {
             ),
             const SizedBox(height: 8),
 
-            if (solvedAt != null)
+            if (localSolvedAt != null)
               Text(
-                'Çözülme tarihi: $solvedAt',
+                'Çözülme tarihi: $localSolvedAt',
                 style: const TextStyle(color: Colors.grey),
               ),
 
             const SizedBox(height: 16),
 
             // AI ANALİZİ
-            if (aiAnalysis.isNotEmpty)
+            if (localAnalysis.isNotEmpty)
               Card(
                 color: Colors.purple.shade50,
                 child: Padding(
@@ -74,7 +101,7 @@ class ResultDetailScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        aiAnalysis,
+                        localAnalysis,
                         style: const TextStyle(fontSize: 14),
                       ),
                     ],
@@ -95,7 +122,7 @@ class ResultDetailScreen extends StatelessWidget {
             const SizedBox(height: 24),
 
             const Text(
-              'Soru ve Cevapların',
+              'Sorular ve Cevapların',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
@@ -104,11 +131,12 @@ class ResultDetailScreen extends StatelessWidget {
             ListView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: answers.length,
+              itemCount: localAnswers.length,
               itemBuilder: (context, index) {
-                final soru = index < questions.length ? questions[index] : 'Soru ${index + 1}';
-                final cevap = answers[index];
-
+                final soru = index < localQuestions.length
+                    ? localQuestions[index]
+                    : 'Soru ${index + 1}';
+                final cevap = localAnswers[index];
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),

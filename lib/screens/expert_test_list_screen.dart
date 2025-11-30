@@ -2,103 +2,84 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import 'expert_test_detail_screen.dart';
-
 class ExpertTestListScreen extends StatelessWidget {
   const ExpertTestListScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+
     if (user == null) {
       return const Scaffold(
-        body: Center(child: Text('Devam etmek için lütfen giriş yapın.')),
+        body: Center(child: Text('Önce giriş yapmalısın.')),
       );
     }
 
-    final stream = FirebaseFirestore.instance
-        .collection('tests')
-        .where('createdBy', isEqualTo: user.uid)
-        .orderBy('createdAt', descending: true)
-        .snapshots();
-
-    Future<void> deleteTest(String testId) async {
-      await FirebaseFirestore.instance.collection('tests').doc(testId).delete();
-    }
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Oluşturduğum Testler')),
+      appBar: AppBar(
+        title: const Text('Oluşturduğum Testler'),
+      ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: stream,
+        stream: FirebaseFirestore.instance
+            .collection('tests')
+            .where('createdBy', isEqualTo: user.uid)
+            .snapshots(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(
-              child: Text(
-                'Testler yüklenirken hata oluştu.\n${snapshot.error}',
-                textAlign: TextAlign.center,
-              ),
-            );
-          }
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
-          final docs = snapshot.data!.docs;
-          if (docs.isEmpty) {
-            return const Center(child: Text('Henüz test oluşturmamışsınız.'));
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text('Henüz test oluşturmadın.'));
           }
 
-          return ListView.separated(
+          final docs = snapshot.data!.docs.toList();
+
+          // createdAt 'e göre sırala (yine client-side)
+          docs.sort((a, b) {
+            final aTs = a['createdAt'] as Timestamp?;
+            final bTs = b['createdAt'] as Timestamp?;
+            final aTime =
+                aTs?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final bTime =
+                bTs?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return bTime.compareTo(aTime);
+          });
+
+          return ListView.builder(
             itemCount: docs.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final doc = docs[index];
-              final data = doc.data() as Map<String, dynamic>;
+              final data = doc.data() as Map<String, dynamic>? ?? {};
               final title = data['title']?.toString() ?? 'Başlıksız test';
-              final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+              final description = data['description']?.toString() ?? '';
+              final questions =
+              (data['questions'] as List<dynamic>? ?? const []).toList();
+              final answerType = data['answerType']?.toString() ?? 'text';
 
-              return ListTile(
-                title: Text(title),
-                subtitle: createdAt != null
-                    ? Text('Oluşturulma: $createdAt')
-                    : null,
-                trailing: IconButton(
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () async {
-                    final ok = await showDialog<bool>(
-                      context: context,
-                      builder: (_) => AlertDialog(
-                        title: const Text('Testi sil'),
-                        content: const Text(
-                            'Bu testi silmek istediğinizden emin misiniz?'),
-                        actions: [
-                          TextButton(
-                            onPressed: () =>
-                                Navigator.of(context).pop(false),
-                            child: const Text('Vazgeç'),
-                          ),
-                          TextButton(
-                            onPressed: () =>
-                                Navigator.of(context).pop(true),
-                            child: const Text('Sil'),
-                          ),
-                        ],
+              return Card(
+                margin:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: ListTile(
+                  title: Text(title),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (description.isNotEmpty) Text(description),
+                      Text(
+                        'Soru sayısı: ${questions.length} • Cevap tipi: ${answerType == 'scale' ? '1–5 Skala' : 'Yazılı'}',
+                        style:
+                        const TextStyle(fontSize: 12, color: Colors.grey),
                       ),
-                    ) ??
-                        false;
-                    if (ok) {
-                      await deleteTest(doc.id);
-                    }
+                    ],
+                  ),
+                  onTap: () {
+                    Navigator.pushNamed(
+                      context,
+                      '/expertTestDetail',
+                      arguments: doc.id,
+                    );
                   },
                 ),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => ExpertTestDetailScreen(testId: doc.id),
-                    ),
-                  );
-                },
               );
             },
           );

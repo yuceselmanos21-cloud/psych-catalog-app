@@ -1,58 +1,52 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../analysis_secrets.dart'; // 👈 key buradan gelecek
 
-/// Gemini ile konuşan servis sınıfı
 class AnalysisService {
-  // 🔐 KENDİ API KEY’İNİ YAZ
-  static const String _apiKey = 'AIzaSyBRRUdVYG08zfejt8wYn9eVxrn-jgO0Ogw';
-
-  static const String _model = 'models/gemini-2.5-flash';
+  static const String _model = 'models/gemini-2.0-flash-lite-001';
 
   static Future<String> generateAnalysis(String prompt) async {
+    final apiKey = AnalysisSecrets.geminiApiKey;
+
+    // Güvenlik için sadece ilk 6 karakteri loglayalım
+    // debugPrint('Gemini key (ilk 6): ${apiKey.substring(0, 6)}******');
+
     final uri = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/$_model:generateContent?key=$_apiKey',
+      'https://generativelanguage.googleapis.com/v1beta/$_model:generateContent'
+          '?key=$apiKey',
     );
 
-    final body = {
+    final body = jsonEncode({
       'contents': [
         {
           'parts': [
-            {'text': prompt}
+            {'text': prompt},
           ]
         }
       ]
-    };
+    });
 
-    final response = await http.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(body),
-    );
+    try {
+      final res = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      );
 
-    if (response.statusCode != 200) {
-      // Hata mesajını ekranda gösterebilmek için olduğu gibi döndürüyoruz
-      return 'Gemini API hatası: ${response.statusCode} ${response.body}';
+      if (res.statusCode != 200) {
+        // Hata durumunda Flutter tarafında düzgün mesaj gösterelim
+        return 'Gemini API hatası: ${res.statusCode} ${res.body}';
+      }
+
+      final data = jsonDecode(res.body);
+      final text = data['candidates']?[0]['content']?['parts']?[0]['text'];
+
+      if (text is String && text.trim().isNotEmpty) {
+        return text.trim();
+      }
+      return 'Yapay zekâdan anlamlı bir yanıt alınamadı.';
+    } catch (e) {
+      return 'Yapay zekâ isteği sırasında hata oluştu: $e';
     }
-
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    final candidates = data['candidates'] as List<dynamic>?;
-    if (candidates == null || candidates.isEmpty) {
-      return 'Modelden yanıt alınamadı.';
-    }
-
-    final first = candidates.first as Map<String, dynamic>;
-    final content = first['content'] as Map<String, dynamic>?;
-    final parts = content?['parts'] as List<dynamic>?;
-
-    if (parts == null || parts.isEmpty) {
-      return 'Modelden yanıt alınamadı.';
-    }
-
-    final part0 = parts.first as Map<String, dynamic>;
-    final text = part0['text']?.toString();
-
-    return text?.trim().isNotEmpty == true
-        ? text!.trim()
-        : 'Model boş yanıt döndürdü.';
   }
 }
