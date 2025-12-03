@@ -14,7 +14,6 @@ class _FeedScreenState extends State<FeedScreen> {
   String? _name;
   bool _loading = true;
 
-  // Yeni paylaşım için controller
   final TextEditingController _postCtrl = TextEditingController();
   bool _posting = false;
 
@@ -43,12 +42,14 @@ class _FeedScreenState extends State<FeedScreen> {
           .get();
 
       final data = snap.data();
+      if (!mounted) return;
       setState(() {
         _role = data?['role'] ?? 'client';
         _name = data?['name'] ?? 'Kullanıcı';
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _role = 'client';
         _name = 'Kullanıcı';
@@ -65,11 +66,42 @@ class _FeedScreenState extends State<FeedScreen> {
 
   // 🔹 Uzman / Danışan için üstteki kısayol butonları
   Widget _buildRoleActions(bool isExpert) {
-    if (isExpert) {
-      return Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        // ORTAK BUTONLAR (UZMAN + DANIŞAN)
+        ElevatedButton.icon(
+          onPressed: () {
+            Navigator.pushNamed(context, '/tests');
+          },
+          icon: const Icon(Icons.playlist_add_check),
+          label: const Text('Test Çöz'),
+        ),
+        ElevatedButton.icon(
+          onPressed: () {
+            Navigator.pushNamed(context, '/solvedTests');
+          },
+          icon: const Icon(Icons.history),
+          label: const Text('Çözdüğüm Testler'),
+        ),
+        ElevatedButton.icon(
+          onPressed: () {
+            Navigator.pushNamed(context, '/analysis');
+          },
+          icon: const Icon(Icons.psychology),
+          label: const Text('AI Analiz'),
+        ),
+        ElevatedButton.icon(
+          onPressed: () {
+            Navigator.pushNamed(context, '/experts');
+          },
+          icon: const Icon(Icons.groups),
+          label: const Text('Uzmanları Keşfet'),
+        ),
+
+        // SADECE UZMANLARA ÖZEL EKSTRA BUTONLAR
+        if (isExpert) ...[
           ElevatedButton.icon(
             onPressed: () {
               Navigator.pushNamed(context, '/createTest');
@@ -84,45 +116,9 @@ class _FeedScreenState extends State<FeedScreen> {
             icon: const Icon(Icons.list_alt),
             label: const Text('Oluşturduğum Testler'),
           ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pushNamed(context, '/analysis');
-            },
-            icon: const Icon(Icons.psychology),
-            label: const Text('AI Analiz'),
-          ),
         ],
-      );
-    } else {
-      // Danışan aksiyonları
-      return Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pushNamed(context, '/tests');
-            },
-            icon: const Icon(Icons.playlist_add_check),
-            label: const Text('Test Çöz'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pushNamed(context, '/solvedTests');
-            },
-            icon: const Icon(Icons.history),
-            label: const Text('Çözdüğüm Testler'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pushNamed(context, '/analysis');
-            },
-            icon: const Icon(Icons.psychology),
-            label: const Text('AI Analiz'),
-          ),
-        ],
-      );
-    }
+      ],
+    );
   }
 
   // 🔹 Uzmanın yeni paylaşım oluşturma alanı
@@ -271,15 +267,15 @@ class _FeedScreenState extends State<FeedScreen> {
         _selectedType = 'text';
       });
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Paylaşım yapılamadı: $e')),
       );
     } finally {
-      if (mounted) {
-        setState(() {
-          _posting = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _posting = false;
+      });
     }
   }
 
@@ -311,6 +307,7 @@ class _FeedScreenState extends State<FeedScreen> {
 
             final text = data['text']?.toString() ?? '';
             final authorName = data['authorName']?.toString() ?? 'Kullanıcı';
+            final authorId = data['authorId']?.toString();
             final role = data['authorRole']?.toString() ?? 'client';
             final ts = data['createdAt'] as Timestamp?;
             final createdAt = ts?.toDate();
@@ -318,69 +315,100 @@ class _FeedScreenState extends State<FeedScreen> {
 
             final isExpertPost = role == 'expert';
 
-            return Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Üstte profil bilgisi
-                    Row(
-                      children: [
-                        CircleAvatar(
-                          child: Text(
-                            authorName.isNotEmpty
-                                ? authorName[0].toUpperCase()
-                                : '?',
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                authorName,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
+            return InkWell(
+              onTap: () {
+                Navigator.pushNamed(
+                  context,
+                  '/postDetail',
+                  arguments: doc.id,
+                );
+              },
+              child: Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Üstte profil bilgisi
+                      Row(
+                        children: [
+                          GestureDetector(
+                            onTap: authorId == null
+                                ? null
+                                : () {
+                              Navigator.pushNamed(
+                                context,
+                                '/publicExpertProfile',
+                                arguments: authorId,
+                              );
+                            },
+                            child: CircleAvatar(
+                              child: Text(
+                                authorName.isNotEmpty
+                                    ? authorName[0].toUpperCase()
+                                    : '?',
                               ),
-                              Text(
-                                isExpertPost ? 'Uzman' : 'Danışan',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: isExpertPost
-                                      ? Colors.deepPurple
-                                      : Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (createdAt != null)
-                          Text(
-                            _formatDateTime(createdAt),
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey,
                             ),
                           ),
-                      ],
-                    ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: authorId == null
+                                  ? null
+                                  : () {
+                                Navigator.pushNamed(
+                                  context,
+                                  '/publicExpertProfile',
+                                  arguments: authorId,
+                                );
+                              },
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    authorName,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  Text(
+                                    isExpertPost ? 'Uzman' : 'Danışan',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isExpertPost
+                                          ? Colors.deepPurple
+                                          : Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (createdAt != null)
+                            Text(
+                              _formatDateTime(createdAt),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey,
+                              ),
+                            ),
+                        ],
+                      ),
 
-                    const SizedBox(height: 8),
+                      const SizedBox(height: 8),
 
-                    // Açıklama / metin kısmı
-                    if (text.isNotEmpty) Text(text),
+                      // Açıklama / metin kısmı
+                      if (text.isNotEmpty) Text(text),
 
-                    const SizedBox(height: 8),
+                      const SizedBox(height: 8),
 
-                    // Gönderi tipine göre sahte medya alanları
-                    if (postType == 'image') _buildFakeImageBox(),
-                    if (postType == 'video') _buildFakeVideoBox(),
-                    if (postType == 'audio') _buildFakeAudioBox(),
-                  ],
+                      // Gönderi tipine göre sahte medya alanları
+                      if (postType == 'image') _buildFakeImageBox(),
+                      if (postType == 'video') _buildFakeVideoBox(),
+                      if (postType == 'audio') _buildFakeAudioBox(),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -489,18 +517,15 @@ class _FeedScreenState extends State<FeedScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Rol bilgisi
             Text(
               'Rolün: ${isExpert ? 'Uzman' : 'Danışan'}',
               style: const TextStyle(fontSize: 16),
             ),
             const SizedBox(height: 8),
 
-            // Uzman/Danışan kısa yolları
             _buildRoleActions(isExpert),
             const SizedBox(height: 16),
 
-            // Uzman ise paylaşım kutusu
             if (isExpert) _buildPostComposer(),
             if (isExpert) const SizedBox(height: 16),
 
@@ -513,7 +538,6 @@ class _FeedScreenState extends State<FeedScreen> {
             ),
             const SizedBox(height: 8),
 
-            // Akış
             Expanded(
               child: _buildFeedList(),
             ),

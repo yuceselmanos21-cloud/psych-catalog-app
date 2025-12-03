@@ -1,8 +1,17 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-class ExpertsListScreen extends StatelessWidget {
+import 'expert_public_profile_screen.dart';
+
+class ExpertsListScreen extends StatefulWidget {
   const ExpertsListScreen({super.key});
+
+  @override
+  State<ExpertsListScreen> createState() => _ExpertsListScreenState();
+}
+
+class _ExpertsListScreenState extends State<ExpertsListScreen> {
+  String _search = '';
 
   @override
   Widget build(BuildContext context) {
@@ -12,45 +21,161 @@ class ExpertsListScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Uzmanlar'),
+        title: const Text('Uzmanları Keşfet'),
       ),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: expertsQuery.snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const Center(child: Text('Uzmanlar yüklenirken hata oluştu.'));
-          }
+      body: Column(
+        children: [
+          // 🔍 ARAMA KUTUSU
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              decoration: const InputDecoration(
+                labelText: 'Uzman ara (isim, şehir, alan...)',
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  _search = value.trim().toLowerCase();
+                });
+              },
+            ),
+          ),
 
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+          // 🔁 UZMAN LİSTESİ
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: expertsQuery.snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-          final docs = snapshot.data!.docs;
-          if (docs.isEmpty) {
-            return const Center(child: Text('Kayıtlı uzman bulunamadı.'));
-          }
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return const Center(
+                    child: Text('Henüz uzman kaydı yok.'),
+                  );
+                }
 
-          return ListView.builder(
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final doc = docs[index];
-              final data = doc.data() as Map<String, dynamic>;
+                final allDocs = snapshot.data!.docs;
 
-              final name = data['name']?.toString() ?? 'İsimsiz';
-              final city = data['city']?.toString() ?? 'Şehir belirtilmemiş';
-              final profession =
-                  data['profession']?.toString() ?? 'Meslek belirtilmemiş';
-              final specialization =
-                  data['specialization']?.toString() ?? 'Uzmanlık belirtilmemiş';
+                // 🔎 İSİM / ŞEHİR / MESLEK / UZMANLIK ARAMA
+                final filtered = allDocs.where((doc) {
+                  final data =
+                      doc.data() as Map<String, dynamic>? ?? <String, dynamic>{};
+                  final name = (data['name'] ?? '').toString().toLowerCase();
+                  final city = (data['city'] ?? '').toString().toLowerCase();
+                  final profession =
+                  (data['profession'] ?? '').toString().toLowerCase();
+                  final specialties =
+                  (data['specialties'] ?? '').toString().toLowerCase();
 
-              return ListTile(
-                title: Text(name),
-                subtitle: Text('$profession • $specialization\n$city'),
-                isThreeLine: true,
-              );
-            },
-          );
-        },
+                  if (_search.isEmpty) return true;
+
+                  return name.contains(_search) ||
+                      city.contains(_search) ||
+                      profession.contains(_search) ||
+                      specialties.contains(_search);
+                }).toList();
+
+                if (filtered.isEmpty) {
+                  return const Center(
+                    child: Text('Aramana uygun uzman bulunamadı.'),
+                  );
+                }
+
+                return ListView.builder(
+                  itemCount: filtered.length,
+                  itemBuilder: (context, index) {
+                    final doc = filtered[index];
+                    final data =
+                        doc.data() as Map<String, dynamic>? ?? <String, dynamic>{};
+
+                    final expertId = doc.id;
+                    final name =
+                        data['name']?.toString() ?? 'Uzman';
+                    final city =
+                        data['city']?.toString() ?? 'Belirtilmemiş';
+                    final profession =
+                        data['profession']?.toString() ?? 'Meslek belirtilmemiş';
+                    final specialties =
+                        data['specialties']?.toString() ?? '';
+                    final photoUrl = data['photoUrl']?.toString();
+
+                    return Card(
+                      margin:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      child: ListTile(
+                        leading: CircleAvatar(
+                          backgroundImage: (photoUrl != null &&
+                              photoUrl.isNotEmpty)
+                              ? NetworkImage(photoUrl)
+                              : null,
+                          child: (photoUrl == null || photoUrl.isEmpty)
+                              ? Text(
+                            name.isNotEmpty
+                                ? name[0].toUpperCase()
+                                : '?',
+                          )
+                              : null,
+                        ),
+                        title: Text(name),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              profession,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.location_on,
+                                  size: 14,
+                                  color: Colors.grey,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  city,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ],
+                            ),
+                            if (specialties.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  specialties,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.deepPurple,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        onTap: () {
+                          // 👇 UZMAN PROFİL SAYFASI
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ExpertPublicProfileScreen(
+                                expertId: expertId,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

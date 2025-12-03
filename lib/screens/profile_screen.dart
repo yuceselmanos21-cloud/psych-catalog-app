@@ -1,12 +1,6 @@
-import 'dart:typed_data';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -17,25 +11,17 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _loading = true;
-  bool _saving = false;
   bool _editing = false;
-  String? _error;
+  bool _saving = false;
 
+  String? _uid;
   Map<String, dynamic>? _userData;
 
-  // Text controller'lar
-  final TextEditingController _cityCtrl = TextEditingController();
-  final TextEditingController _specializationCtrl = TextEditingController();
-  final TextEditingController _bioCtrl = TextEditingController();
+  final _cityCtrl = TextEditingController();
+  final _specialtiesCtrl = TextEditingController();
+  final _aboutCtrl = TextEditingController();
 
-  String? _selectedProfession;
-  Uint8List? _newImageBytes;
-  Uint8List? _newCvBytes;
-  String? _newCvFileName;
-
-  final ImagePicker _imagePicker = ImagePicker();
-
-  final List<String> professions = const [
+  final List<String> _professionOptions = [
     'Psikolog',
     'Klinik Psikolog',
     'Nöropsikolog',
@@ -44,327 +30,699 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'Sosyal Hizmet Uzmanı',
     'Aile Danışmanı',
   ];
+  String? _selectedProfession;
 
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    _loadUser();
+  }
+
+  Future<void> _loadUser() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
+      return;
+    }
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final data = doc.data() ?? <String, dynamic>{};
+
+      if (!mounted) return;
+      setState(() {
+        _uid = user.uid;
+        _userData = data;
+        _loading = false;
+      });
+
+      _fillControllersFromData(data);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Profil yüklenemedi: $e')),
+      );
+    }
+  }
+
+  void _fillControllersFromData(Map<String, dynamic> data) {
+    _cityCtrl.text = data['city']?.toString() ?? '';
+    _specialtiesCtrl.text = data['specialties']?.toString() ?? '';
+    _aboutCtrl.text = data['about']?.toString() ?? '';
+    _selectedProfession = data['profession']?.toString();
+  }
+
+  Future<void> _saveProfile() async {
+    if (_uid == null) return;
+
+    setState(() {
+      _saving = true;
+    });
+
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(_uid).update({
+        'city': _cityCtrl.text.trim(),
+        'specialties': _specialtiesCtrl.text.trim(),
+        'about': _aboutCtrl.text.trim(),
+        if (_selectedProfession != null && _selectedProfession!.isNotEmpty)
+          'profession': _selectedProfession,
+      });
+
+      await _loadUser();
+      if (!mounted) return;
+      setState(() {
+        _editing = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profil güncellendi.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Profil güncellenemedi: $e')),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+      });
+    }
   }
 
   @override
   void dispose() {
     _cityCtrl.dispose();
-    _specializationCtrl.dispose();
-    _bioCtrl.dispose();
+    _specialtiesCtrl.dispose();
+    _aboutCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _loadUserData() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  // ---------- AKTİVİTELER: TESTLER & POSTLAR ----------
 
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        setState(() {
-          _loading = false;
-          _error = 'Oturum bulunamadı.';
-        });
-        return;
-      }
+  Widget _buildMyCreatedTests() {
+    if (_uid == null) return const SizedBox.shrink();
 
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
-      if (!snap.exists) {
-        setState(() {
-          _loading = false;
-          _error = 'Kullanıcı kaydı bulunamadı.';
-        });
-        return;
-      }
-
-      final data = snap.data() as Map<String, dynamic>;
-      _userData = data;
-
-      _cityCtrl.text = data['city']?.toString() ?? '';
-      _specializationCtrl.text = data['specialization']?.toString() ?? '';
-      _bioCtrl.text = data['bio']?.toString() ?? '';
-
-      if (data['profession'] != null &&
-          data['profession'].toString().isNotEmpty) {
-        _selectedProfession = data['profession'].toString();
-      } else {
-        _selectedProfession = null;
-      }
-
-      setState(() {
-        _loading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
-    }
-  }
-
-  void _enterEditMode() {
-    if (_userData == null) return;
-
-    setState(() {
-      _editing = true;
-      _error = null;
-      _newImageBytes = null;
-      _newCvBytes = null;
-      _newCvFileName = null;
-
-      _cityCtrl.text = _userData?['city']?.toString() ?? '';
-      _specializationCtrl.text =
-          _userData?['specialization']?.toString() ?? '';
-      _bioCtrl.text = _userData?['bio']?.toString() ?? '';
-
-      if (_userData?['profession'] != null &&
-          _userData!['profession'].toString().isNotEmpty) {
-        _selectedProfession = _userData!['profession'].toString();
-      } else {
-        _selectedProfession = null;
-      }
-    });
-  }
-
-  void _cancelEdit() {
-    setState(() {
-      _editing = false;
-      _error = null;
-      _newImageBytes = null;
-      _newCvBytes = null;
-      _newCvFileName = null;
-    });
-  }
-
-  Future<void> _pickNewImage() async {
-    try {
-      final picked = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 80,
-      );
-      if (picked == null) return;
-
-      final bytes = await picked.readAsBytes();
-      setState(() {
-        _newImageBytes = bytes;
-      });
-    } catch (e) {
-      setState(() {
-        _error = 'Fotoğraf seçilirken hata oluştu: $e';
-      });
-    }
-  }
-
-  Future<void> _pickNewCv() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf', 'doc', 'docx'],
-        withData: true,
-      );
-
-      if (result == null || result.files.isEmpty) return;
-
-      final file = result.files.first;
-      if (file.bytes == null) {
-        setState(() {
-          _error = 'CV dosyası okunamadı.';
-        });
-        return;
-      }
-
-      setState(() {
-        _newCvBytes = file.bytes;
-        _newCvFileName = file.name;
-      });
-    } catch (e) {
-      setState(() {
-        _error = 'CV seçilirken hata oluştu: $e';
-      });
-    }
-  }
-
-  Future<void> _saveProfile() async {
-    if (_userData == null) return;
-
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        setState(() {
-          _saving = false;
-          _error = 'Oturum bulunamadı.';
-        });
-        return;
-      }
-
-      final uid = user.uid;
-      String? photoUrl = _userData?['photoUrl']?.toString();
-      String? cvUrl = _userData?['cvUrl']?.toString();
-
-      // Yeni fotoğraf yüklendiyse Storage'a yükle
-      if (_newImageBytes != null) {
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('user_avatars')
-            .child('$uid.jpg');
-
-        await ref.putData(
-          _newImageBytes!,
-          SettableMetadata(contentType: 'image/jpeg'),
-        );
-        photoUrl = await ref.getDownloadURL();
-        await user.updatePhotoURL(photoUrl);
-      }
-
-      // Yeni CV yüklendiyse Storage'a yükle
-      if (_newCvBytes != null) {
-        String ext = 'pdf';
-        if (_newCvFileName != null && _newCvFileName!.contains('.')) {
-          ext = _newCvFileName!.split('.').last;
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('tests')
+          .where('createdBy', isEqualTo: _uid)
+          .orderBy('createdAt', descending: true)
+          .limit(5)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Text(
+            'Testler yüklenirken hata: ${snap.error}',
+            style: const TextStyle(color: Colors.red),
+          );
         }
 
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('user_cvs')
-            .child('${uid}_cv.$ext');
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
 
-        await ref.putData(
-          _newCvBytes!,
-          SettableMetadata(contentType: 'application/octet-stream'),
+        if (!snap.hasData || snap.data!.docs.isEmpty) {
+          return const Text(
+            'Henüz oluşturduğun test yok.',
+            style: TextStyle(color: Colors.grey),
+          );
+        }
+
+        final docs = snap.data!.docs;
+
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data();
+            final title = data['title']?.toString() ?? 'Adsız test';
+            final desc = data['description']?.toString() ?? '';
+
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(title),
+              subtitle: Text(
+                desc,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                // Test çözme ekranına git (aynı /tests ekranındaki gibi)
+                Navigator.pushNamed(
+                  context,
+                  '/solveTest',
+                  arguments: docs[index],
+                );
+              },
+            );
+          },
         );
-        cvUrl = await ref.getDownloadURL();
-      }
+      },
+    );
+  }
 
-      final isExpert =
-          (_userData?['role']?.toString() ?? 'client') == 'expert';
+  Widget _buildMySolvedTests() {
+    if (_uid == null) return const SizedBox.shrink();
 
-      final updateData = <String, dynamic>{
-        'city': _cityCtrl.text.trim(),
-        'photoUrl': photoUrl ?? '',
-        'cvUrl': cvUrl ?? '',
-      };
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('solvedTests')
+          .where('userId', isEqualTo: _uid)
+          .orderBy('createdAt', descending: true)
+          .limit(5)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Text(
+            'Çözdüğün testler yüklenirken hata: ${snap.error}',
+            style: const TextStyle(color: Colors.red),
+          );
+        }
 
-      if (isExpert) {
-        updateData['profession'] = _selectedProfession;
-        updateData['specialization'] = _specializationCtrl.text.trim();
-        updateData['bio'] = _bioCtrl.text.trim();
-      }
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
 
+        if (!snap.hasData || snap.data!.docs.isEmpty) {
+          return const Text(
+            'Henüz çözdüğün test yok.',
+            style: TextStyle(color: Colors.grey),
+          );
+        }
+
+        final docs = snap.data!.docs;
+
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data();
+            final title = data['testTitle']?.toString() ?? 'Test sonucu';
+            final ts = data['createdAt'] as Timestamp?;
+            final dt = ts?.toDate();
+
+            return ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(title),
+              subtitle: dt == null
+                  ? null
+                  : Text(
+                _formatDateTime(dt),
+                style: const TextStyle(fontSize: 12),
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.pushNamed(
+                  context,
+                  '/resultDetail',
+                  arguments: {
+                    'testTitle': data['testTitle'],
+                    'answers':
+                    List<dynamic>.from(data['answers'] ?? <dynamic>[]),
+                    'questions':
+                    List<dynamic>.from(data['questions'] ?? <dynamic>[]),
+                    'createdAt': data['createdAt'],
+                    'aiAnalysis': data['aiAnalysis'] ?? '',
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _deletePost(String postId) async {
+    try {
       await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .update(updateData);
-
-      _userData = {
-        ...?_userData,
-        ...updateData,
-      };
+          .collection('posts')
+          .doc(postId)
+          .delete();
 
       if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _editing = false;
-      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Paylaşım silindi.')),
+      );
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _saving = false;
-        _error = e.toString();
-      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Paylaşım silinemedi: $e')),
+      );
     }
   }
+
+  Widget _buildMyPosts() {
+    if (_uid == null) return const SizedBox.shrink();
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('posts')
+          .where('authorId', isEqualTo: _uid)
+          .orderBy('createdAt', descending: true)
+          .limit(10)
+          .snapshots(),
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Text(
+            'Paylaşımlar yüklenirken hata: ${snap.error}',
+            style: const TextStyle(color: Colors.red),
+          );
+        }
+
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 8),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (!snap.hasData || snap.data!.docs.isEmpty) {
+          return const Text(
+            'Henüz paylaşım yapmadın.',
+            style: TextStyle(color: Colors.grey),
+          );
+        }
+
+        final docs = snap.data!.docs;
+
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final data = docs[index].data();
+            final text = data['text']?.toString() ?? '';
+            final ts = data['createdAt'] as Timestamp?;
+            final dt = ts?.toDate();
+
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                onTap: () {
+                  Navigator.pushNamed(
+                    context,
+                    '/postDetail',
+                    arguments: docs[index].id,
+                  );
+                },
+                title: Text(
+                  text,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: dt == null
+                    ? null
+                    : Text(
+                  _formatDateTime(dt),
+                  style: const TextStyle(fontSize: 11),
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Paylaşımı sil'),
+                        content: const Text(
+                            'Bu paylaşımı silmek istediğine emin misin?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('Vazgeç'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('Sil'),
+                          ),
+                        ],
+                      ),
+                    );
+
+                    if (confirm == true) {
+                      await _deletePost(docs[index].id);
+                    }
+                  },
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  static String _formatDateTime(DateTime dt) {
+    return '${dt.day.toString().padLeft(2, '0')}.'
+        '${dt.month.toString().padLeft(2, '0')}.'
+        '${dt.year}';
+  }
+
+  // ---------- UI ----------
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    if (_loading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final data = _userData ?? <String, dynamic>{};
+    final name = data['name']?.toString() ?? 'Kullanıcı';
+    final role = (data['role'] ?? 'client').toString();
+    final isExpert = role == 'expert';
+    final city = data['city']?.toString() ?? 'Belirtilmemiş';
+    final profession = data['profession']?.toString() ?? 'Belirtilmemiş';
+    final specialties = data['specialties']?.toString() ?? 'Belirtilmemiş';
+    final about =
+        data['about']?.toString() ?? 'Henüz kendin hakkında bilgi eklemedin.';
+    final photoUrl = data['photoUrl']?.toString();
+    final cvUrl = data['cvUrl']?.toString();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Profilim'),
         actions: [
-          if (_loading)
-            const SizedBox.shrink()
-          else if (_editing)
-            TextButton(
-              onPressed: _saving ? null : _cancelEdit,
-              child: const Text(
-                'İPTAL',
-                style: TextStyle(color: Colors.white),
-              ),
+          if (_editing)
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: 'Düzenlemeyi iptal et',
+              onPressed: () {
+                setState(() {
+                  _editing = false;
+                  _fillControllersFromData(data);
+                });
+              },
             )
           else
             IconButton(
               icon: const Icon(Icons.edit),
-              onPressed: _enterEditMode,
-              tooltip: 'Profili Düzenle',
+              tooltip: 'Profili düzenle',
+              onPressed: () {
+                setState(() {
+                  _editing = true;
+                  _fillControllersFromData(data);
+                });
+              },
             ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _userData == null
-          ? Center(
-        child: Text(
-          _error ?? 'Kullanıcı verisi bulunamadı.',
-          textAlign: TextAlign.center,
-        ),
-      )
-          : SingleChildScrollView(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildHeader(theme),
-            const SizedBox(height: 16),
-            _buildGeneralInfoCard(),
-            const SizedBox(height: 12),
-            _buildExpertInfoCard(),
-            const SizedBox(height: 12),
-            _buildCvCard(),
-            const SizedBox(height: 12),
-            if (_error != null)
-              Text(
-                _error!,
-                style: const TextStyle(color: Colors.red),
+            // ÜST PROFİL BİLGİSİ
+            Center(
+              child: Column(
+                children: [
+                  CircleAvatar(
+                    radius: 40,
+                    backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+                        ? NetworkImage(photoUrl)
+                        : null,
+                    child: (photoUrl == null || photoUrl.isEmpty)
+                        ? Text(
+                      name.isNotEmpty ? name[0].toUpperCase() : '?',
+                      style: const TextStyle(fontSize: 32),
+                    )
+                        : null,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    isExpert ? 'Uzman' : 'Danışan',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isExpert ? Colors.deepPurple : Colors.grey[700],
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.location_on, size: 16),
+                      const SizedBox(width: 4),
+                      Text(city),
+                    ],
+                  ),
+                ],
               ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // GENEL BİLGİLER (Rol + Meslek)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Genel Bilgiler',
+                      style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow(
+                      'Rol',
+                      isExpert ? 'Uzman' : 'Danışan',
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const SizedBox(
+                          width: 110,
+                          child: Text(
+                            'Meslek',
+                            style: TextStyle(fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _editing && isExpert
+                              ? DropdownButtonFormField<String>(
+                            value: _selectedProfession?.isNotEmpty ==
+                                true
+                                ? _selectedProfession
+                                : null,
+                            decoration: const InputDecoration(
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                              contentPadding:
+                              EdgeInsets.symmetric(horizontal: 8),
+                            ),
+                            items: _professionOptions
+                                .map(
+                                  (p) => DropdownMenuItem<String>(
+                                value: p,
+                                child: Text(p),
+                              ),
+                            )
+                                .toList(),
+                            onChanged: (val) {
+                              setState(() {
+                                _selectedProfession = val;
+                              });
+                            },
+                          )
+                              : Text(
+                            profession,
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // UZMAN BİLGİLERİ (Şehir, Uzmanlık Alanı, Hakkında)
+            if (isExpert)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Uzman Bilgileri',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Şehir
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          const SizedBox(
+                            width: 110,
+                            child: Text(
+                              'Şehir',
+                              style: TextStyle(fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _editing
+                                ? TextField(
+                              controller: _cityCtrl,
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                            )
+                                : Text(
+                              city,
+                              style: const TextStyle(fontSize: 14),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Uzmanlık Alanı
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Uzmanlık Alanı',
+                          style: TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      _editing
+                          ? TextField(
+                        controller: _specialtiesCtrl,
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                        ),
+                        maxLines: 2,
+                      )
+                          : Text(specialties),
+
+                      const SizedBox(height: 8),
+
+                      // Hakkında
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Hakkımda',
+                          style: TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      _editing
+                          ? TextField(
+                        controller: _aboutCtrl,
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                        ),
+                        maxLines: 3,
+                      )
+                          : Text(about),
+                    ],
+                  ),
+                ),
+              ),
+
+            const SizedBox(height: 12),
+
+            // CV KARTI (sadece gösterim, yükleme yok – storage işini bekletiyoruz)
+            if (cvUrl != null && cvUrl.isNotEmpty)
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.picture_as_pdf),
+                  title: const Text('CV'),
+                  subtitle: const Text('CV belgen yüklü.'),
+                ),
+              ),
+
             if (_editing) ...[
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
                 child: ElevatedButton.icon(
                   onPressed: _saving ? null : _saveProfile,
                   icon: _saving
                       ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   )
                       : const Icon(Icons.save),
-                  label: Text(
-                    _saving
-                        ? 'Kaydediliyor...'
-                        : 'Değişiklikleri Kaydet',
-                  ),
+                  label:
+                  Text(_saving ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'),
                 ),
               ),
+            ],
+
+            const SizedBox(height: 24),
+
+            // AKTİVİTELER
+            const Text(
+              'Aktivitelerim',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+
+            if (isExpert) ...[
+              const Text(
+                'Oluşturduğum Testler',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              _buildMyCreatedTests(),
+              const SizedBox(height: 16),
+            ],
+
+            const Text(
+              'Çözdüğüm Testlerim',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 4),
+            _buildMySolvedTests(),
+            const SizedBox(height: 16),
+
+            if (isExpert) ...[
+              const Text(
+                'Paylaşımlarım',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              _buildMyPosts(),
             ],
           ],
         ),
@@ -372,303 +730,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ---------------- UI PARÇALARI ----------------
-
-  Widget _buildHeader(ThemeData theme) {
-    final name = _userData?['name']?.toString() ?? '';
-    final email = _userData?['email']?.toString() ?? '';
-    final photoUrl = _userData?['photoUrl']?.toString() ?? '';
-
-    final ImageProvider? imageProvider = _newImageBytes != null
-        ? MemoryImage(_newImageBytes!)
-        : (photoUrl.isNotEmpty
-        ? NetworkImage(photoUrl) as ImageProvider
-        : null);
-
-    return Column(
-      children: [
-        GestureDetector(
-          onTap: _editing ? _pickNewImage : null,
-          child: CircleAvatar(
-            radius: 45,
-            backgroundColor: Colors.purple.shade100,
-            backgroundImage: imageProvider,
-            child: imageProvider == null
-                ? const Icon(Icons.person, size: 50, color: Colors.white)
-                : null,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (_editing)
-          TextButton.icon(
-            onPressed: _pickNewImage,
-            icon: const Icon(Icons.photo_camera),
-            label: const Text('Fotoğrafı Değiştir'),
-          ),
-        const SizedBox(height: 4),
-        Text(
-          name,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          email,
-          style: const TextStyle(color: Colors.grey),
-        ),
-      ],
-    );
-  }
-
-  /// GENEL BİLGİLER: Rol + Meslek
-  Widget _buildGeneralInfoCard() {
-    final role = _userData?['role']?.toString() ?? 'client';
-    final isExpert = role == 'expert';
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Genel Bilgiler',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-
-            // 1) ROL
-            _infoRow('Rol', isExpert ? 'Uzman' : 'Danışan'),
-            const SizedBox(height: 8),
-
-            // 2) MESLEK (Uzman için dropdown, danışan için bilgi)
-            if (isExpert)
-              (_editing
-                  ? DropdownButtonFormField<String>(
-                value: _selectedProfession,
-                decoration: const InputDecoration(
-                  labelText: 'Meslek',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                items: professions
-                    .map(
-                      (p) => DropdownMenuItem(
-                    value: p,
-                    child: Text(p),
-                  ),
-                )
-                    .toList(),
-                onChanged: (val) {
-                  setState(() {
-                    _selectedProfession = val;
-                  });
-                },
-              )
-                  : _infoRow(
-                'Meslek',
-                _userData?['profession']
-                    ?.toString()
-                    .isNotEmpty ==
-                    true
-                    ? _userData!['profession'].toString()
-                    : 'Belirtilmemiş',
-              ))
-            else
-              _infoRow('Meslek', 'Yok (Danışan)'),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// UZMAN BİLGİLERİ: Şehir, Uzmanlık Alanı, Hakkımda
-  Widget _buildExpertInfoCard() {
-    final role = _userData?['role']?.toString() ?? 'client';
-    final isExpert = role == 'expert';
-    if (!isExpert) return const SizedBox.shrink();
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Uzman Bilgileri',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-
-            // 1) ŞEHİR
-            if (_editing)
-              TextField(
-                controller: _cityCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Şehir',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              )
-            else
-              _infoRow(
-                'Şehir',
-                _userData?['city']?.toString().isNotEmpty == true
-                    ? _userData!['city'].toString()
-                    : 'Belirtilmemiş',
-              ),
-            const SizedBox(height: 8),
-
-            // 2) UZMANLIK ALANI
-            if (_editing)
-              TextField(
-                controller: _specializationCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Uzmanlık Alanı',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              )
-            else
-              _infoRow(
-                'Uzmanlık Alanı',
-                _userData?['specialization']?.toString().isNotEmpty == true
-                    ? _userData!['specialization'].toString()
-                    : 'Belirtilmemiş',
-              ),
-            const SizedBox(height: 12),
-
-            // 3) HAKKIMDA
-            const Text(
-              'Hakkımda',
-              style: TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 4),
-            if (_editing)
-              TextField(
-                controller: _bioCtrl,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  hintText: 'Kendinizi tanıtın...',
-                ),
-              )
-            else
-              Text(
-                _userData?['bio']?.toString().trim().isNotEmpty == true
-                    ? _userData!['bio'].toString()
-                    : 'Kendinizi tanıtan bir yazı eklemediniz.',
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCvCard() {
-    final role = _userData?['role']?.toString() ?? 'client';
-    final isExpert = role == 'expert';
-    if (!isExpert) return const SizedBox.shrink();
-
-    final currentCvUrl = _userData?['cvUrl']?.toString() ?? '';
-    final hasCurrentCv = currentCvUrl.isNotEmpty;
-
-    return Card(
-      elevation: 1.5,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              Icons.description_outlined,
-              size: 32,
-              color: Colors.purple.shade400,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'CV Bilgisi',
-                    style:
-                    TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-
-                  if (_editing) ...[
-                    Text(
-                      _newCvFileName ??
-                          (hasCurrentCv
-                              ? 'Mevcut CV korunacak. Yeni CV seçerseniz güncellenecek.'
-                              : 'Henüz CV seçilmedi.'),
-                    ),
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: _pickNewCv,
-                      icon: const Icon(Icons.upload_file),
-                      label: const Text('CV Seç'),
-                    ),
-                  ] else ...[
-                    if (hasCurrentCv) ...[
-                      const Text(
-                        'CV yüklendi.',
-                        style: TextStyle(fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Aşağıdaki linki kopyalayıp tarayıcıda açarak CV\'yi görüntüleyebilirsin:',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      const SizedBox(height: 4),
-                      SelectableText(
-                        currentCvUrl,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue,
-                          decoration: TextDecoration.underline,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed: () {
-                            Clipboard.setData(
-                              ClipboardData(text: currentCvUrl),
-                            );
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('CV linki panoya kopyalandı.'),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.copy),
-                          label: const Text('Linki Kopyala'),
-                        ),
-                      ),
-                    ] else ...[
-                      const Text('Herhangi bir CV yüklenmemiş.'),
-                    ],
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _infoRow(String label, String value) {
+  Widget _buildInfoRow(String label, String value) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '$label: ',
-          style: const TextStyle(fontWeight: FontWeight.w600),
+        SizedBox(
+          width: 110,
+          child: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w500),
+          ),
         ),
-        Expanded(child: Text(value)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 14),
+          ),
+        ),
       ],
     );
   }
