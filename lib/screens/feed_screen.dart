@@ -20,6 +20,8 @@ class _FeedScreenState extends State<FeedScreen> {
   // Gönderi tipi: text / image / video / audio
   String _selectedType = 'text';
 
+  User? get _currentUser => FirebaseAuth.instance.currentUser;
+
   @override
   void initState() {
     super.initState();
@@ -27,7 +29,7 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   Future<void> _loadUserData() async {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _currentUser;
     if (user == null) {
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/login');
@@ -43,6 +45,7 @@ class _FeedScreenState extends State<FeedScreen> {
 
       final data = snap.data();
       if (!mounted) return;
+
       setState(() {
         _role = data?['role'] ?? 'client';
         _name = data?['name'] ?? 'Kullanıcı';
@@ -64,7 +67,7 @@ class _FeedScreenState extends State<FeedScreen> {
     Navigator.pushReplacementNamed(context, '/login');
   }
 
-  // 🔹 Uzman / Danışan için üstteki kısayol butonları
+  // ---------- ROL BUTONLARI (Test, AI vs.) ----------
   Widget _buildRoleActions(bool isExpert) {
     return Wrap(
       spacing: 8,
@@ -100,7 +103,7 @@ class _FeedScreenState extends State<FeedScreen> {
           label: const Text('Uzmanları Keşfet'),
         ),
 
-        // SADECE UZMANLARA ÖZEL EKSTRA BUTONLAR
+        // SADECE UZMANLAR
         if (isExpert) ...[
           ElevatedButton.icon(
             onPressed: () {
@@ -121,7 +124,7 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  // 🔹 Uzmanın yeni paylaşım oluşturma alanı
+  // ---------- YENİ GÖNDERİ OLUŞTURMA (SADECE UZMAN) ----------
   Widget _buildPostComposer() {
     return Card(
       elevation: 2,
@@ -131,14 +134,14 @@ class _FeedScreenState extends State<FeedScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Yeni Paylaşım',
+              'Yeni Gönderi',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 8),
 
-            // Gönderi tipi seçim butonları
+            // Gönderi tipi
             Row(
               children: [
                 _buildTypeChip('text', Icons.text_fields, 'Metin'),
@@ -166,7 +169,7 @@ class _FeedScreenState extends State<FeedScreen> {
 
             const SizedBox(height: 6),
 
-            // Şimdilik media yok ama "varmış gibi" his
+            // Şimdilik medya yok, ama varmış gibi his verelim
             if (_selectedType != 'text')
               Row(
                 children: [
@@ -245,7 +248,7 @@ class _FeedScreenState extends State<FeedScreen> {
     final text = _postCtrl.text.trim();
     if (text.isEmpty) return;
 
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _currentUser;
     if (user == null) return;
 
     setState(() {
@@ -256,10 +259,19 @@ class _FeedScreenState extends State<FeedScreen> {
       await FirebaseFirestore.instance.collection('posts').add({
         'text': text,
         'authorId': user.uid,
-        'authorName': _name ?? 'Uzman',
+        'authorName': _name ?? 'Kullanıcı',
         'authorRole': _role ?? 'expert',
-        'type': _selectedType, // 🔥 gönderi tipi kaydediliyor
+        'type': _selectedType,
         'createdAt': FieldValue.serverTimestamp(),
+
+        // Twitter-vari alanlar (başlangıç değerleri)
+        'likeCount': 0,
+        'replyCount': 0,
+        'repostCount': 0,
+        'quoteCount': 0,
+        'likedBy': <String>[],
+        'repostOfPostId': null,
+        'editedAt': null,
       });
 
       _postCtrl.clear();
@@ -279,9 +291,9 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
-  // 🔹 Tüm kullanıcıların gördüğü sosyal akış
+  // ---------- FEED LİSTESİ ----------
   Widget _buildFeedList() {
-    return StreamBuilder<QuerySnapshot>(
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance
           .collection('posts')
           .orderBy('createdAt', descending: true)
@@ -303,121 +315,392 @@ class _FeedScreenState extends State<FeedScreen> {
           itemCount: docs.length,
           itemBuilder: (context, index) {
             final doc = docs[index];
-            final data = doc.data() as Map<String, dynamic>? ?? {};
-
-            final text = data['text']?.toString() ?? '';
-            final authorName = data['authorName']?.toString() ?? 'Kullanıcı';
-            final authorId = data['authorId']?.toString();
-            final role = data['authorRole']?.toString() ?? 'client';
-            final ts = data['createdAt'] as Timestamp?;
-            final createdAt = ts?.toDate();
-            final postType = data['type']?.toString() ?? 'text';
-
-            final isExpertPost = role == 'expert';
-
-            return InkWell(
-              onTap: () {
-                Navigator.pushNamed(
-                  context,
-                  '/postDetail',
-                  arguments: doc.id,
-                );
-              },
-              child: Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Üstte profil bilgisi
-                      Row(
-                        children: [
-                          GestureDetector(
-                            onTap: authorId == null
-                                ? null
-                                : () {
-                              Navigator.pushNamed(
-                                context,
-                                '/publicExpertProfile',
-                                arguments: authorId,
-                              );
-                            },
-                            child: CircleAvatar(
-                              child: Text(
-                                authorName.isNotEmpty
-                                    ? authorName[0].toUpperCase()
-                                    : '?',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: authorId == null
-                                  ? null
-                                  : () {
-                                Navigator.pushNamed(
-                                  context,
-                                  '/publicExpertProfile',
-                                  arguments: authorId,
-                                );
-                              },
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    authorName,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  Text(
-                                    isExpertPost ? 'Uzman' : 'Danışan',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isExpertPost
-                                          ? Colors.deepPurple
-                                          : Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          if (createdAt != null)
-                            Text(
-                              _formatDateTime(createdAt),
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey,
-                              ),
-                            ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      // Açıklama / metin kısmı
-                      if (text.isNotEmpty) Text(text),
-
-                      const SizedBox(height: 8),
-
-                      // Gönderi tipine göre sahte medya alanları
-                      if (postType == 'image') _buildFakeImageBox(),
-                      if (postType == 'video') _buildFakeVideoBox(),
-                      if (postType == 'audio') _buildFakeAudioBox(),
-                    ],
-                  ),
-                ),
-              ),
-            );
+            return _buildPostCard(doc);
           },
         );
       },
     );
   }
 
+  // ---------- TEK BİR GÖNDERİ KARTI (Twitter tarzı) ----------
+  Widget _buildPostCard(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? <String, dynamic>{};
+
+    final text = data['text']?.toString() ?? '';
+    final authorName = data['authorName']?.toString() ?? 'Kullanıcı';
+    final authorId = data['authorId']?.toString();
+    final role = data['authorRole']?.toString() ?? 'client';
+    final ts = data['createdAt'] as Timestamp?;
+    final createdAt = ts?.toDate();
+    final postType = data['type']?.toString() ?? 'text';
+
+    final likedByRaw = data['likedBy'];
+    final List<String> likedBy = likedByRaw is List
+        ? likedByRaw.map((e) => e.toString()).toList()
+        : <String>[];
+
+    final likeCount = _asInt(data['likeCount'] ?? likedBy.length);
+    final replyCount = _asInt(data['replyCount'] ?? 0);
+    final repostCount = _asInt(data['repostCount'] ?? 0);
+
+    final isExpertPost = role == 'expert';
+    final currentUserId = _currentUser?.uid;
+    final isLiked = currentUserId != null && likedBy.contains(currentUserId);
+    final isOwner = currentUserId != null && currentUserId == authorId;
+
+    final editedTs = data['editedAt'] as Timestamp?;
+    final editedAt = editedTs?.toDate();
+
+    return InkWell(
+      onTap: () {
+        // Gönderi detay sayfasına git
+        Navigator.pushNamed(
+          context,
+          '/postDetail',
+          arguments: doc.id,
+        );
+      },
+      child: Card(
+        margin: const EdgeInsets.only(bottom: 8),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Üst satır: avatar + isim + rol + tarih
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  GestureDetector(
+                    onTap: () {
+                      _openAuthorProfile(authorId, role);
+                    },
+                    child: CircleAvatar(
+                      child: Text(
+                        authorName.isNotEmpty
+                            ? authorName[0].toUpperCase()
+                            : '?',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        _openAuthorProfile(authorId, role);
+                      },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            authorName,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            isExpertPost ? 'Uzman' : 'Danışan',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isExpertPost
+                                  ? Colors.deepPurple
+                                  : Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (createdAt != null)
+                    Text(
+                      _formatDateTime(createdAt) +
+                          (editedAt != null ? ' · düzenlendi' : ''),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  if (isOwner)
+                    PopupMenuButton<String>(
+                      onSelected: (value) {
+                        if (value == 'edit') {
+                          _showEditPostDialog(doc.id, text);
+                        } else if (value == 'delete') {
+                          _confirmDeletePost(doc.id);
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'edit',
+                          child: Text('Düzenle'),
+                        ),
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: Text('Sil'),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+
+              const SizedBox(height: 8),
+
+              // Metin
+              if (text.isNotEmpty) Text(text),
+
+              const SizedBox(height: 8),
+
+              // Gönderi tipine göre sahte medya alanları
+              if (postType == 'image') _buildFakeImageBox(),
+              if (postType == 'video') _buildFakeVideoBox(),
+              if (postType == 'audio') _buildFakeAudioBox(),
+
+              const SizedBox(height: 8),
+
+              // Aksiyon butonları (yorum / repost / beğeni)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildActionButton(
+                    icon: Icons.mode_comment_outlined,
+                    label: replyCount > 0 ? replyCount.toString() : '',
+                    onTap: () {
+                      Navigator.pushNamed(
+                        context,
+                        '/postDetail',
+                        arguments: doc.id,
+                      );
+                    },
+                  ),
+                  _buildActionButton(
+                    icon: Icons.repeat,
+                    label: repostCount > 0 ? repostCount.toString() : '',
+                    onTap: () {
+                      _repostPost(doc.id, data);
+                    },
+                  ),
+                  _buildActionButton(
+                    icon: isLiked ? Icons.favorite : Icons.favorite_border,
+                    label: likeCount > 0 ? likeCount.toString() : '',
+                    iconColor: isLiked ? Colors.red : Colors.grey[700],
+                    onTap: () {
+                      if (currentUserId != null) {
+                        _toggleLike(doc.id, currentUserId, isLiked);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------- AKSİYON BUTONU WIDGET ----------
+  Widget _buildActionButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    String label = '',
+    Color? iconColor,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: iconColor ?? Colors.grey[700]),
+            if (label.isNotEmpty) ...[
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(color: Colors.grey[700], fontSize: 12),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------- LIKE / REPOST / PROFİL AÇMA ----------
+
+  Future<void> _toggleLike(
+      String postId, String userId, bool currentlyLiked) async {
+    final ref = FirebaseFirestore.instance.collection('posts').doc(postId);
+
+    await FirebaseFirestore.instance.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      if (!snap.exists) return;
+
+      final data = snap.data() as Map<String, dynamic>? ?? {};
+      final raw = data['likedBy'];
+      final likedBy = raw is List
+          ? raw.map((e) => e.toString()).toList()
+          : <String>[];
+
+      int likeCount = _asInt(data['likeCount'] ?? likedBy.length);
+
+      if (likedBy.contains(userId)) {
+        likedBy.remove(userId);
+        likeCount = likeCount > 0 ? likeCount - 1 : 0;
+      } else {
+        likedBy.add(userId);
+        likeCount = likeCount + 1;
+      }
+
+      tx.update(ref, {
+        'likedBy': likedBy,
+        'likeCount': likeCount,
+      });
+    });
+  }
+
+  Future<void> _repostPost(
+      String originalPostId, Map<String, dynamic> originalData) async {
+    final user = _currentUser;
+    if (user == null) return;
+
+    try {
+      // Orijinal gönderinin repostCount'unu arttır
+      final originalRef =
+      FirebaseFirestore.instance.collection('posts').doc(originalPostId);
+      await originalRef.update({
+        'repostCount': FieldValue.increment(1),
+      });
+
+      // Kullanıcı kendi feed'ine repost olarak yeni bir kayıt eklesin
+      await FirebaseFirestore.instance.collection('posts').add({
+        'text': originalData['text']?.toString() ?? '',
+        'authorId': user.uid,
+        'authorName': _name ?? 'Kullanıcı',
+        'authorRole': _role ?? 'client',
+        'type': originalData['type'] ?? 'text',
+        'createdAt': FieldValue.serverTimestamp(),
+        'repostOfPostId': originalPostId,
+
+        'likeCount': 0,
+        'replyCount': 0,
+        'repostCount': 0,
+        'quoteCount': 0,
+        'likedBy': <String>[],
+        'editedAt': null,
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Repost yapılamadı: $e')),
+      );
+    }
+  }
+
+  void _openAuthorProfile(String? authorId, String role) {
+    if (authorId == null) return;
+    final currentUserId = _currentUser?.uid;
+
+    if (role == 'expert') {
+      Navigator.pushNamed(
+        context,
+        '/publicExpertProfile',
+        arguments: authorId,
+      );
+    } else if (currentUserId != null && currentUserId == authorId) {
+      // Kendi profili
+      Navigator.pushNamed(context, '/profile');
+    } else {
+      // Şimdilik başka client profili yok, dokunma
+    }
+  }
+
+  // ---------- DÜZENLE / SİL ----------
+  void _showEditPostDialog(String postId, String currentText) {
+    final controller = TextEditingController(text: currentText);
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Gönderiyi Düzenle'),
+          content: TextField(
+            controller: controller,
+            maxLines: 5,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+              },
+              child: const Text('İptal'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final newText = controller.text.trim();
+                if (newText.isEmpty) return;
+
+                try {
+                  await FirebaseFirestore.instance
+                      .collection('posts')
+                      .doc(postId)
+                      .update({
+                    'text': newText,
+                    'editedAt': FieldValue.serverTimestamp(),
+                  });
+                  if (mounted) Navigator.pop(ctx);
+                } catch (e) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Düzenlenemedi: $e')),
+                  );
+                }
+              },
+              child: const Text('Kaydet'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _confirmDeletePost(String postId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gönderiyi sil'),
+        content: const Text('Bu gönderiyi silmek istediğine emin misin?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('İptal'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                await FirebaseFirestore.instance
+                    .collection('posts')
+                    .doc(postId)
+                    .delete();
+                if (mounted) Navigator.pop(ctx);
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Silinemedi: $e')),
+                );
+              }
+            },
+            child: const Text('Sil'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------- SAHTE MEDYA BOX'LAR ----------
   Widget _buildFakeImageBox() {
     return Container(
       height: 160,
@@ -470,6 +753,13 @@ class _FeedScreenState extends State<FeedScreen> {
         ],
       ),
     );
+  }
+
+  // ---------- YARDIMCI FONKSİYONLAR ----------
+  int _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    return 0;
   }
 
   String _formatDateTime(DateTime dt) {
