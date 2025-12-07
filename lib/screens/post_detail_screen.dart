@@ -2,8 +2,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../repositories/firestore_post_repository.dart';
+
 class PostDetailScreen extends StatefulWidget {
-  final String postId; // 👈 main.dart'tan gelen id
+  final String postId;
 
   const PostDetailScreen({
     super.key,
@@ -15,250 +17,228 @@ class PostDetailScreen extends StatefulWidget {
 }
 
 class _PostDetailScreenState extends State<PostDetailScreen> {
-  final TextEditingController _commentCtrl = TextEditingController();
-  bool _sendingComment = false;
-  bool _deleting = false;
+  final TextEditingController _replyCtrl = TextEditingController();
+  bool _sendingReply = false;
 
-  @override
-  void dispose() {
-    _commentCtrl.dispose();
-    super.dispose();
-  }
+  final _postRepo = FirestorePostRepository();
+
+  String _currentUserName = 'Kullanıcı';
+  String _currentUserRole = 'client';
 
   User? get _currentUser => FirebaseAuth.instance.currentUser;
 
-  /// Beğeni (like) aç / kapa
-  Future<void> _toggleLike(
-      DocumentSnapshot<Map<String, dynamic>> doc,
-      String userId,
-      ) async {
-    final ref = doc.reference;
-    final data = doc.data() ?? <String, dynamic>{};
-
-    final List<dynamic> currentLikesRaw = data['likes'] ?? [];
-    final likes = currentLikesRaw.map((e) => e.toString()).toList();
-    final hasLiked = likes.contains(userId);
-
-    await ref.update({
-      'likes': hasLiked
-          ? FieldValue.arrayRemove([userId])
-          : FieldValue.arrayUnion([userId]),
-      'likeCount': FieldValue.increment(hasLiked ? -1 : 1),
-    });
+  @override
+  void initState() {
+    super.initState();
+    _loadCurrentUserProfile();
   }
 
-  /// Yorum gönder
-  Future<void> _sendComment() async {
-    final text = _commentCtrl.text.trim();
-    if (text.isEmpty) return;
+  Future<void> _loadCurrentUserProfile() async {
     final user = _currentUser;
     if (user == null) return;
 
-    setState(() {
-      _sendingComment = true;
-    });
-
     try {
-      // Kullanıcı adını çek
-      final userSnap = await FirebaseFirestore.instance
+      final snap = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
 
-      final uData = userSnap.data() ?? <String, dynamic>{};
-      final authorName = uData['name']?.toString() ?? 'Kullanıcı';
+      final data = snap.data();
+      if (!mounted) return;
 
-      final postRef =
-      FirebaseFirestore.instance.collection('posts').doc(widget.postId);
-
-      await FirebaseFirestore.instance.runTransaction((tx) async {
-        final snap = await tx.get(postRef);
-        if (!snap.exists) return;
-
-        final commentsRef = postRef.collection('comments').doc();
-        tx.set(commentsRef, {
-          'text': text,
-          'authorId': user.uid,
-          'authorName': authorName,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-
-        tx.update(postRef, {
-          'commentCount': FieldValue.increment(1),
-        });
+      setState(() {
+        _currentUserName = (data?['name'] ?? 'Kullanıcı').toString();
+        _currentUserRole = (data?['role'] ?? 'client').toString();
       });
-
-      _commentCtrl.clear();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Yorum gönderilemedi: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _sendingComment = false;
-        });
-      }
+    } catch (_) {
+      // sessiz geç
     }
   }
 
-  /// Gönderiyi sil (sadece kendi gönderisi ise)
-  Future<void> _deletePost() async {
-    if (_currentUser == null) return;
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Gönderiyi sil'),
-        content: const Text(
-            'Bu gönderiyi silmek istediğine emin misin? Bu işlem geri alınamaz.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Vazgeç'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sil'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    setState(() {
-      _deleting = true;
-    });
-
-    try {
-      final postRef =
-      FirebaseFirestore.instance.collection('posts').doc(widget.postId);
-
-      await postRef.delete();
-      if (mounted) {
-        Navigator.pop(context); // Detay ekranından çık
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _deleting = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gönderi silinemedi: $e')),
-        );
-      }
-    }
+  @override
+  void dispose() {
+    _replyCtrl.dispose();
+    super.dispose();
   }
 
-  /// Gönderi metnini düzenleme
-  Future<void> _editPost(String currentText) async {
-    final postRef =
-    FirebaseFirestore.instance.collection('posts').doc(widget.postId);
-
-    final TextEditingController editCtrl =
-    TextEditingController(text: currentText);
-
-    final newText = await showDialog<String?>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Gönderiyi düzenle'),
-          content: TextField(
-            controller: editCtrl,
-            maxLines: 5,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              child: const Text('Vazgeç'),
-            ),
-            ElevatedButton(
-              onPressed: () =>
-                  Navigator.pop(ctx, editCtrl.text.trim()),
-              child: const Text('Kaydet'),
-            ),
-          ],
-        );
-      },
-    );
-
-    editCtrl.dispose();
-
-    if (newText == null || newText.isEmpty) return;
-
-    try {
-      await postRef.update({
-        'text': newText,
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Güncellenemedi: $e')),
-        );
-      }
-    }
+  int _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
   }
 
   String _formatDateTime(DateTime dt) {
     return '${dt.day.toString().padLeft(2, '0')}.'
         '${dt.month.toString().padLeft(2, '0')}.'
-        '${dt.year}  '
-        '${dt.hour.toString().padLeft(2, '0')}:'
+        '${dt.year} ${dt.hour.toString().padLeft(2, '0')}:'
         '${dt.minute.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _sendReply() async {
+    final text = _replyCtrl.text.trim();
+    if (text.isEmpty) return;
+
+    final user = _currentUser;
+    if (user == null) return;
+
+    setState(() => _sendingReply = true);
+
+    try {
+      await _postRepo.addReply(
+        postId: widget.postId,
+        text: text,
+        authorId: user.uid,
+        authorName: _currentUserName,
+      );
+
+      _replyCtrl.clear();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Yorum eklenemedi: $e')),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() => _sendingReply = false);
+    }
+  }
+
+  void _openAuthorProfile(String? authorId, String role) {
+    if (authorId == null) return;
+    final currentUserId = _currentUser?.uid;
+
+    if (role == 'expert') {
+      Navigator.pushNamed(
+        context,
+        '/publicExpertProfile',
+        arguments: authorId,
+      );
+    } else if (currentUserId != null && currentUserId == authorId) {
+      Navigator.pushNamed(context, '/profile');
+    }
+  }
+
+  void _showEditPostDialog(String postId, String currentText) {
+    final controller = TextEditingController(text: currentText);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gönderiyi Düzenle'),
+        content: TextField(
+          controller: controller,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('İptal'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final newText = controller.text.trim();
+              if (newText.isEmpty) return;
+
+              try {
+                await _postRepo.updatePostText(
+                  postId: postId,
+                  newText: newText,
+                );
+                if (mounted) Navigator.pop(ctx);
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Düzenlenemedi: $e')),
+                );
+              }
+            },
+            child: const Text('Kaydet'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeletePost(String postId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gönderiyi sil'),
+        content: const Text('Bu gönderiyi silmek istediğine emin misin?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('İptal'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                await _postRepo.deletePost(postId);
+                if (mounted) {
+                  Navigator.pop(ctx);
+                  Navigator.pop(context);
+                }
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Silinemedi: $e')),
+                );
+              }
+            },
+            child: const Text('Sil'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final postDocStream = FirebaseFirestore.instance
-        .collection('posts')
-        .doc(widget.postId)
-        .snapshots();
+    final currentUserId = _currentUser?.uid;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Gönderi'),
       ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: postDocStream,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(
-              child: Text('Gönderi yüklenirken hata oluştu: ${snapshot.error}'),
-            );
-          }
-
-          if (snapshot.connectionState == ConnectionState.waiting) {
+        stream: _postRepo.watchPost(widget.postId),
+        builder: (context, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
-          if (!snapshot.hasData || !snapshot.data!.exists) {
+          if (!snap.hasData || !snap.data!.exists) {
             return const Center(child: Text('Gönderi bulunamadı.'));
           }
 
-          final doc = snapshot.data!;
-          final data = doc.data() ?? <String, dynamic>{};
+          final data = snap.data!.data() ?? <String, dynamic>{};
 
           final text = data['text']?.toString() ?? '';
-          final authorId = data['authorId']?.toString() ?? '';
           final authorName = data['authorName']?.toString() ?? 'Kullanıcı';
-          final authorRole = data['authorRole']?.toString() ?? 'client';
+          final authorId = data['authorId']?.toString();
+          final role = data['authorRole']?.toString() ?? 'client';
+
           final ts = data['createdAt'] as Timestamp?;
           final createdAt = ts?.toDate();
-          final List<dynamic> likesRaw = data['likes'] ?? [];
-          final likes = likesRaw.map((e) => e.toString()).toList();
-          final likeCount = data['likeCount'] is int ? data['likeCount'] as int : likes.length;
-          final commentCount = data['commentCount'] is int
-              ? data['commentCount'] as int
-              : 0;
-          final user = _currentUser;
-          final isOwner = user != null && user.uid == authorId;
-          final hasLiked = user != null && likes.contains(user.uid);
+
+          final likedByRaw = data['likedBy'];
+          final likedBy = likedByRaw is List
+              ? likedByRaw.map((e) => e.toString()).toList()
+              : <String>[];
+
+          final likeCount = _asInt(data['likeCount'] ?? likedBy.length);
+          final replyCount = _asInt(data['replyCount'] ?? 0);
+          final repostCount = _asInt(data['repostCount'] ?? 0);
+
+          final editedTs = data['editedAt'] as Timestamp?;
+          final editedAt = editedTs?.toDate();
+
+          final isOwner = currentUserId != null && currentUserId == authorId;
+          final isLiked =
+              currentUserId != null && likedBy.contains(currentUserId);
 
           return Column(
             children: [
@@ -268,222 +248,235 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ÜST SATIR: avatar + isim + rol + menü
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          GestureDetector(
-                            onTap: authorId.isEmpty
-                                ? null
-                                : () {
-                              // Uzman profilini aç
-                              Navigator.pushNamed(
-                                context,
-                                '/publicExpertProfile',
-                                arguments: authorId,
-                              );
-                            },
-                            child: CircleAvatar(
-                              child: Text(
-                                authorName.isNotEmpty
-                                    ? authorName[0].toUpperCase()
-                                    : '?',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: authorId.isEmpty
-                                  ? null
-                                  : () {
-                                Navigator.pushNamed(
-                                  context,
-                                  '/publicExpertProfile',
-                                  arguments: authorId,
-                                );
-                              },
-                              child: Column(
-                                crossAxisAlignment:
-                                CrossAxisAlignment.start,
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
                                 children: [
-                                  Text(
-                                    authorName,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
+                                  GestureDetector(
+                                    onTap: () =>
+                                        _openAuthorProfile(authorId, role),
+                                    child: CircleAvatar(
+                                      child: Text(
+                                        authorName.isNotEmpty
+                                            ? authorName[0].toUpperCase()
+                                            : '?',
+                                      ),
                                     ),
                                   ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () =>
+                                          _openAuthorProfile(authorId, role),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            authorName,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          Text(
+                                            role == 'expert'
+                                                ? 'Uzman'
+                                                : 'Danışan',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: role == 'expert'
+                                                  ? Colors.deepPurple
+                                                  : Colors.grey[600],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  if (isOwner)
+                                    PopupMenuButton<String>(
+                                      onSelected: (value) {
+                                        if (value == 'edit') {
+                                          _showEditPostDialog(
+                                              widget.postId, text);
+                                        } else if (value == 'delete') {
+                                          _confirmDeletePost(widget.postId);
+                                        }
+                                      },
+                                      itemBuilder: (context) => const [
+                                        PopupMenuItem(
+                                          value: 'edit',
+                                          child: Text('Düzenle'),
+                                        ),
+                                        PopupMenuItem(
+                                          value: 'delete',
+                                          child: Text('Sil'),
+                                        ),
+                                      ],
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                text,
+                                style: const TextStyle(fontSize: 16),
+                              ),
+                              const SizedBox(height: 12),
+                              if (createdAt != null)
+                                Text(
+                                  _formatDateTime(createdAt) +
+                                      (editedAt != null
+                                          ? ' · düzenlendi'
+                                          : ''),
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              const SizedBox(height: 12),
+
+                              Row(
+                                children: [
                                   Text(
-                                    authorRole == 'expert'
-                                        ? 'Uzman'
-                                        : 'Danışan',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: authorRole == 'expert'
-                                          ? Colors.deepPurple
-                                          : Colors.grey[600],
+                                    '$replyCount Yanıt',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Text(
+                                    '$repostCount Repost',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Text(
+                                    '$likeCount Beğeni',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ],
                               ),
-                            ),
-                          ),
-                          if (isOwner)
-                            PopupMenuButton<String>(
-                              onSelected: (value) {
-                                if (value == 'edit') {
-                                  _editPost(text);
-                                } else if (value == 'delete') {
-                                  _deletePost();
-                                }
-                              },
-                              itemBuilder: (ctx) => [
-                                const PopupMenuItem(
-                                  value: 'edit',
-                                  child: Text('Düzenle'),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'delete',
-                                  child: Text('Sil'),
-                                ),
-                              ],
-                            ),
-                        ],
-                      ),
+                              const SizedBox(height: 8),
 
-                      const SizedBox(height: 12),
-
-                      // GÖNDERİ METNİ
-                      Text(
-                        text,
-                        style: const TextStyle(fontSize: 16),
-                      ),
-
-                      const SizedBox(height: 12),
-
-                      if (createdAt != null)
-                        Text(
-                          _formatDateTime(createdAt),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
+                              Row(
+                                mainAxisAlignment:
+                                MainAxisAlignment.spaceBetween,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.mode_comment_outlined,
+                                    ),
+                                    onPressed: () {},
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.repeat),
+                                    onPressed: () {
+                                      // Şimdilik boş bırakıyoruz.
+                                      // İstersen bir sonraki adımda repost’u da repo’ya ekleriz.
+                                    },
+                                  ),
+                                  IconButton(
+                                    icon: Icon(
+                                      isLiked
+                                          ? Icons.favorite
+                                          : Icons.favorite_border,
+                                      color: isLiked ? Colors.red : null,
+                                    ),
+                                    onPressed: () {
+                                      if (currentUserId != null) {
+                                        _postRepo.toggleLike(
+                                          postId: widget.postId,
+                                          userId: currentUserId,
+                                        );
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
-
-                      const Divider(height: 24),
-
-                      // LIKE / COMMENT SAYILARI
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.favorite,
-                            size: 18,
-                            color: likeCount > 0
-                                ? Colors.red
-                                : Colors.grey[500],
-                          ),
-                          const SizedBox(width: 4),
-                          Text('$likeCount beğeni'),
-                          const SizedBox(width: 16),
-                          Icon(
-                            Icons.mode_comment_outlined,
-                            size: 18,
-                            color: Colors.grey[500],
-                          ),
-                          const SizedBox(width: 4),
-                          Text('$commentCount yorum'),
-                        ],
                       ),
 
-                      const Divider(height: 24),
+                      const SizedBox(height: 16),
 
-                      // YORUM LİSTESİ
                       const Text(
-                        'Yorumlar',
+                        'Yanıtlar',
                         style: TextStyle(
-                          fontSize: 16,
                           fontWeight: FontWeight.bold,
+                          fontSize: 16,
                         ),
                       ),
                       const SizedBox(height: 8),
 
                       StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                        stream: FirebaseFirestore.instance
-                            .collection('posts')
-                            .doc(widget.postId)
-                            .collection('comments')
-                            .orderBy('createdAt', descending: true)
-                            .snapshots(),
-                        builder: (context, commentSnap) {
-                          if (commentSnap.hasError) {
-                            return Padding(
-                              padding:
-                              const EdgeInsets.symmetric(vertical: 8),
-                              child: Text(
-                                'Yorumlar yüklenirken hata: ${commentSnap.error}',
-                                style:
-                                const TextStyle(color: Colors.red),
-                              ),
-                            );
-                          }
-
-                          if (commentSnap.connectionState ==
+                        stream: _postRepo.watchReplies(widget.postId),
+                        builder: (context, replySnap) {
+                          if (replySnap.connectionState ==
                               ConnectionState.waiting) {
                             return const Padding(
-                              padding:
-                              EdgeInsets.symmetric(vertical: 8),
+                              padding: EdgeInsets.symmetric(vertical: 8),
                               child: Center(
                                 child: CircularProgressIndicator(),
                               ),
                             );
                           }
 
-                          if (!commentSnap.hasData ||
-                              commentSnap.data!.docs.isEmpty) {
+                          if (!replySnap.hasData ||
+                              replySnap.data!.docs.isEmpty) {
                             return const Padding(
-                              padding:
-                              EdgeInsets.symmetric(vertical: 4),
+                              padding: EdgeInsets.symmetric(vertical: 8),
                               child: Text(
-                                'Henüz yorum yok. İlk yorumu sen yaz.',
+                                'Henüz yanıt yok. İlk yorumu sen yaz.',
                                 style: TextStyle(color: Colors.grey),
                               ),
                             );
                           }
 
-                          final cDocs = commentSnap.data!.docs;
+                          final replies = replySnap.data!.docs;
 
                           return ListView.builder(
                             shrinkWrap: true,
-                            physics:
-                            const NeverScrollableScrollPhysics(),
-                            itemCount: cDocs.length,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: replies.length,
                             itemBuilder: (context, index) {
-                              final cData = cDocs[index].data();
-                              final cText =
-                                  cData['text']?.toString() ?? '';
-                              final cAuthor =
-                                  cData['authorName']?.toString() ??
+                              final rData =
+                                  replies[index].data() ?? <String, dynamic>{};
+                              final rText = rData['text']?.toString() ?? '';
+                              final rAuthor =
+                                  rData['authorName']?.toString() ??
                                       'Kullanıcı';
-                              final cTs =
-                              cData['createdAt'] as Timestamp?;
-                              final cDate = cTs?.toDate();
+                              final rTs = rData['createdAt'] as Timestamp?;
+                              final rDate = rTs?.toDate();
 
                               return ListTile(
                                 contentPadding: EdgeInsets.zero,
-                                title: Text(
-                                  cAuthor,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold),
+                                leading: CircleAvatar(
+                                  child: Text(
+                                    rAuthor.isNotEmpty
+                                        ? rAuthor[0].toUpperCase()
+                                        : '?',
+                                  ),
                                 ),
+                                title: Text(rAuthor),
                                 subtitle: Column(
-                                  crossAxisAlignment:
-                                  CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(cText),
-                                    if (cDate != null)
+                                    Text(rText),
+                                    if (rDate != null)
                                       Text(
-                                        _formatDateTime(cDate),
+                                        _formatDateTime(rDate),
                                         style: const TextStyle(
                                           fontSize: 11,
                                           color: Colors.grey,
@@ -501,72 +494,47 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 ),
               ),
 
-              // ALTTA LIKE + YORUM YAZMA ALANI
-              Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  border: const Border(
-                    top: BorderSide(color: Colors.grey),
+              SafeArea(
+                child: Container(
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    border: const Border(
+                      top: BorderSide(color: Colors.grey),
+                    ),
                   ),
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      onPressed: (_currentUser == null || _deleting)
-                          ? null
-                          : () => _toggleLike(
-                        snapshot.data!,
-                        _currentUser!.uid,
-                      ),
-                      icon: Icon(
-                        hasLiked
-                            ? Icons.favorite
-                            : Icons.favorite_border,
-                        color:
-                        hasLiked ? Colors.red : Colors.grey[700],
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: TextField(
-                        controller: _commentCtrl,
-                        enabled:
-                        _currentUser != null && !_sendingComment,
-                        decoration: InputDecoration(
-                          hintText: _currentUser == null
-                              ? 'Yorum yapmak için giriş yapın'
-                              : 'Yanıt yaz...',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          contentPadding:
-                          const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _replyCtrl,
+                          minLines: 1,
+                          maxLines: 3,
+                          decoration: const InputDecoration(
+                            hintText: 'Yanıt yaz...',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      onPressed: (_currentUser == null ||
-                          _sendingComment ||
-                          _deleting)
-                          ? null
-                          : _sendComment,
-                      icon: _sendingComment
-                          ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
-                      )
-                          : const Icon(Icons.send),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: _sendingReply
+                            ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                            : const Icon(Icons.send),
+                        onPressed: _sendingReply ? null : _sendReply,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

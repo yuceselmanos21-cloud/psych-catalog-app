@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../repositories/firestore_post_repository.dart';
+
 class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
 
@@ -17,8 +19,9 @@ class _FeedScreenState extends State<FeedScreen> {
   final TextEditingController _postCtrl = TextEditingController();
   bool _posting = false;
 
-  // Gönderi tipi: text / image / video / audio
   String _selectedType = 'text';
+
+  final _postRepo = FirestorePostRepository();
 
   User? get _currentUser => FirebaseAuth.instance.currentUser;
 
@@ -47,11 +50,11 @@ class _FeedScreenState extends State<FeedScreen> {
       if (!mounted) return;
 
       setState(() {
-        _role = data?['role'] ?? 'client';
-        _name = data?['name'] ?? 'Kullanıcı';
+        _role = (data?['role'] ?? 'client').toString();
+        _name = (data?['name'] ?? 'Kullanıcı').toString();
         _loading = false;
       });
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _role = 'client';
@@ -67,55 +70,40 @@ class _FeedScreenState extends State<FeedScreen> {
     Navigator.pushReplacementNamed(context, '/login');
   }
 
-  // ---------- ROL BUTONLARI (Test, AI vs.) ----------
+  // ---------- ROL BUTONLARI ----------
   Widget _buildRoleActions(bool isExpert) {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
-        // ORTAK BUTONLAR (UZMAN + DANIŞAN)
         ElevatedButton.icon(
-          onPressed: () {
-            Navigator.pushNamed(context, '/tests');
-          },
+          onPressed: () => Navigator.pushNamed(context, '/tests'),
           icon: const Icon(Icons.playlist_add_check),
           label: const Text('Test Çöz'),
         ),
         ElevatedButton.icon(
-          onPressed: () {
-            Navigator.pushNamed(context, '/solvedTests');
-          },
+          onPressed: () => Navigator.pushNamed(context, '/solvedTests'),
           icon: const Icon(Icons.history),
           label: const Text('Çözdüğüm Testler'),
         ),
         ElevatedButton.icon(
-          onPressed: () {
-            Navigator.pushNamed(context, '/analysis');
-          },
+          onPressed: () => Navigator.pushNamed(context, '/analysis'),
           icon: const Icon(Icons.psychology),
           label: const Text('AI Analiz'),
         ),
         ElevatedButton.icon(
-          onPressed: () {
-            Navigator.pushNamed(context, '/experts');
-          },
+          onPressed: () => Navigator.pushNamed(context, '/experts'),
           icon: const Icon(Icons.groups),
           label: const Text('Uzmanları Keşfet'),
         ),
-
-        // SADECE UZMANLAR
         if (isExpert) ...[
           ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pushNamed(context, '/createTest');
-            },
+            onPressed: () => Navigator.pushNamed(context, '/createTest'),
             icon: const Icon(Icons.note_add),
             label: const Text('Test Oluştur'),
           ),
           ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pushNamed(context, '/expertTests');
-            },
+            onPressed: () => Navigator.pushNamed(context, '/expertTests'),
             icon: const Icon(Icons.list_alt),
             label: const Text('Oluşturduğum Testler'),
           ),
@@ -124,7 +112,7 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  // ---------- YENİ GÖNDERİ OLUŞTURMA (SADECE UZMAN) ----------
+  // ---------- POST COMPOSER ----------
   Widget _buildPostComposer() {
     return Card(
       elevation: 2,
@@ -135,13 +123,10 @@ class _FeedScreenState extends State<FeedScreen> {
           children: [
             const Text(
               'Yeni Gönderi',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
 
-            // Gönderi tipi
             Row(
               children: [
                 _buildTypeChip('text', Icons.text_fields, 'Metin'),
@@ -153,7 +138,6 @@ class _FeedScreenState extends State<FeedScreen> {
                 _buildTypeChip('audio', Icons.graphic_eq, 'Ses'),
               ],
             ),
-
             const SizedBox(height: 8),
 
             TextField(
@@ -166,36 +150,6 @@ class _FeedScreenState extends State<FeedScreen> {
                 border: const OutlineInputBorder(),
               ),
             ),
-
-            const SizedBox(height: 6),
-
-            // Şimdilik medya yok, ama varmış gibi his verelim
-            if (_selectedType != 'text')
-              Row(
-                children: [
-                  Icon(
-                    _selectedType == 'image'
-                        ? Icons.image_outlined
-                        : _selectedType == 'video'
-                        ? Icons.videocam_outlined
-                        : Icons.audiotrack_outlined,
-                    size: 18,
-                    color: Colors.grey[700],
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _selectedType == 'image'
-                        ? 'Fotoğraf eklenecek (ileride).'
-                        : _selectedType == 'video'
-                        ? 'Video eklenecek (ileride).'
-                        : 'Ses kaydı eklenecek (ileride).',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                ],
-              ),
 
             const SizedBox(height: 8),
 
@@ -223,6 +177,7 @@ class _FeedScreenState extends State<FeedScreen> {
     final isSelected = _selectedType == value;
     return ChoiceChip(
       selected: isSelected,
+      selectedColor: Colors.deepPurple,
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -235,7 +190,6 @@ class _FeedScreenState extends State<FeedScreen> {
           Text(label),
         ],
       ),
-      selectedColor: Colors.deepPurple,
       onSelected: (_) {
         setState(() {
           _selectedType = value;
@@ -244,6 +198,7 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
+  // ✅ ARTIK REPO
   Future<void> _submitPost() async {
     final text = _postCtrl.text.trim();
     if (text.isEmpty) return;
@@ -251,33 +206,19 @@ class _FeedScreenState extends State<FeedScreen> {
     final user = _currentUser;
     if (user == null) return;
 
-    setState(() {
-      _posting = true;
-    });
+    setState(() => _posting = true);
 
     try {
-      await FirebaseFirestore.instance.collection('posts').add({
-        'text': text,
-        'authorId': user.uid,
-        'authorName': _name ?? 'Kullanıcı',
-        'authorRole': _role ?? 'expert',
-        'type': _selectedType,
-        'createdAt': FieldValue.serverTimestamp(),
-
-        // Twitter-vari alanlar (başlangıç değerleri)
-        'likeCount': 0,
-        'replyCount': 0,
-        'repostCount': 0,
-        'quoteCount': 0,
-        'likedBy': <String>[],
-        'repostOfPostId': null,
-        'editedAt': null,
-      });
+      await _postRepo.sendPost(
+        text,
+        authorId: user.uid,
+        authorName: _name ?? 'Kullanıcı',
+        authorRole: _role ?? 'expert',
+        type: _selectedType,
+      );
 
       _postCtrl.clear();
-      setState(() {
-        _selectedType = 'text';
-      });
+      setState(() => _selectedType = 'text');
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -285,28 +226,21 @@ class _FeedScreenState extends State<FeedScreen> {
       );
     } finally {
       if (!mounted) return;
-      setState(() {
-        _posting = false;
-      });
+      setState(() => _posting = false);
     }
   }
 
   // ---------- FEED LİSTESİ ----------
   Widget _buildFeedList() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('posts')
-          .orderBy('createdAt', descending: true)
-          .snapshots(),
+      stream: _postRepo.watchFeed(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Center(
-            child: Text('Henüz hiç paylaşım yok.'),
-          );
+          return const Center(child: Text('Henüz hiç paylaşım yok.'));
         }
 
         final docs = snapshot.data!.docs;
@@ -322,7 +256,7 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  // ---------- TEK BİR GÖNDERİ KARTI (Twitter tarzı) ----------
+  // ---------- POST CARD ----------
   Widget _buildPostCard(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
 
@@ -353,7 +287,6 @@ class _FeedScreenState extends State<FeedScreen> {
 
     return InkWell(
       onTap: () {
-        // Gönderi detay sayfasına git
         Navigator.pushNamed(
           context,
           '/postDetail',
@@ -367,14 +300,11 @@ class _FeedScreenState extends State<FeedScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Üst satır: avatar + isim + rol + tarih
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   GestureDetector(
-                    onTap: () {
-                      _openAuthorProfile(authorId, role);
-                    },
+                    onTap: () => _openAuthorProfile(authorId, role),
                     child: CircleAvatar(
                       child: Text(
                         authorName.isNotEmpty
@@ -386,17 +316,13 @@ class _FeedScreenState extends State<FeedScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: GestureDetector(
-                      onTap: () {
-                        _openAuthorProfile(authorId, role);
-                      },
+                      onTap: () => _openAuthorProfile(authorId, role),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             authorName,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           Text(
                             isExpertPost ? 'Uzman' : 'Danışan',
@@ -429,15 +355,9 @@ class _FeedScreenState extends State<FeedScreen> {
                           _confirmDeletePost(doc.id);
                         }
                       },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                          value: 'edit',
-                          child: Text('Düzenle'),
-                        ),
-                        const PopupMenuItem(
-                          value: 'delete',
-                          child: Text('Sil'),
-                        ),
+                      itemBuilder: (context) => const [
+                        PopupMenuItem(value: 'edit', child: Text('Düzenle')),
+                        PopupMenuItem(value: 'delete', child: Text('Sil')),
                       ],
                     ),
                 ],
@@ -445,19 +365,16 @@ class _FeedScreenState extends State<FeedScreen> {
 
               const SizedBox(height: 8),
 
-              // Metin
               if (text.isNotEmpty) Text(text),
 
               const SizedBox(height: 8),
 
-              // Gönderi tipine göre sahte medya alanları
               if (postType == 'image') _buildFakeImageBox(),
               if (postType == 'video') _buildFakeVideoBox(),
               if (postType == 'audio') _buildFakeAudioBox(),
 
               const SizedBox(height: 8),
 
-              // Aksiyon butonları (yorum / repost / beğeni)
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -476,7 +393,17 @@ class _FeedScreenState extends State<FeedScreen> {
                     icon: Icons.repeat,
                     label: repostCount > 0 ? repostCount.toString() : '',
                     onTap: () {
-                      _repostPost(doc.id, data);
+                      final user = _currentUser;
+                      if (user == null) return;
+
+                      _postRepo.repostPost(
+                        originalPostId: doc.id,
+                        text: text,
+                        type: postType,
+                        authorId: user.uid,
+                        authorName: _name ?? 'Kullanıcı',
+                        authorRole: _role ?? 'client',
+                      );
                     },
                   ),
                   _buildActionButton(
@@ -485,7 +412,10 @@ class _FeedScreenState extends State<FeedScreen> {
                     iconColor: isLiked ? Colors.red : Colors.grey[700],
                     onTap: () {
                       if (currentUserId != null) {
-                        _toggleLike(doc.id, currentUserId, isLiked);
+                        _postRepo.toggleLike(
+                          postId: doc.id,
+                          userId: currentUserId,
+                        );
                       }
                     },
                   ),
@@ -498,7 +428,6 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  // ---------- AKSİYON BUTONU WIDGET ----------
   Widget _buildActionButton({
     required IconData icon,
     required VoidCallback onTap,
@@ -526,147 +455,50 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  // ---------- LIKE / REPOST / PROFİL AÇMA ----------
-
-  Future<void> _toggleLike(
-      String postId, String userId, bool currentlyLiked) async {
-    final ref = FirebaseFirestore.instance.collection('posts').doc(postId);
-
-    await FirebaseFirestore.instance.runTransaction((tx) async {
-      final snap = await tx.get(ref);
-      if (!snap.exists) return;
-
-      final data = snap.data() as Map<String, dynamic>? ?? {};
-      final raw = data['likedBy'];
-      final likedBy = raw is List
-          ? raw.map((e) => e.toString()).toList()
-          : <String>[];
-
-      int likeCount = _asInt(data['likeCount'] ?? likedBy.length);
-
-      if (likedBy.contains(userId)) {
-        likedBy.remove(userId);
-        likeCount = likeCount > 0 ? likeCount - 1 : 0;
-      } else {
-        likedBy.add(userId);
-        likeCount = likeCount + 1;
-      }
-
-      tx.update(ref, {
-        'likedBy': likedBy,
-        'likeCount': likeCount,
-      });
-    });
-  }
-
-  Future<void> _repostPost(
-      String originalPostId, Map<String, dynamic> originalData) async {
-    final user = _currentUser;
-    if (user == null) return;
-
-    try {
-      // Orijinal gönderinin repostCount'unu arttır
-      final originalRef =
-      FirebaseFirestore.instance.collection('posts').doc(originalPostId);
-      await originalRef.update({
-        'repostCount': FieldValue.increment(1),
-      });
-
-      // Kullanıcı kendi feed'ine repost olarak yeni bir kayıt eklesin
-      await FirebaseFirestore.instance.collection('posts').add({
-        'text': originalData['text']?.toString() ?? '',
-        'authorId': user.uid,
-        'authorName': _name ?? 'Kullanıcı',
-        'authorRole': _role ?? 'client',
-        'type': originalData['type'] ?? 'text',
-        'createdAt': FieldValue.serverTimestamp(),
-        'repostOfPostId': originalPostId,
-
-        'likeCount': 0,
-        'replyCount': 0,
-        'repostCount': 0,
-        'quoteCount': 0,
-        'likedBy': <String>[],
-        'editedAt': null,
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Repost yapılamadı: $e')),
-      );
-    }
-  }
-
-  void _openAuthorProfile(String? authorId, String role) {
-    if (authorId == null) return;
-    final currentUserId = _currentUser?.uid;
-
-    if (role == 'expert') {
-      Navigator.pushNamed(
-        context,
-        '/publicExpertProfile',
-        arguments: authorId,
-      );
-    } else if (currentUserId != null && currentUserId == authorId) {
-      // Kendi profili
-      Navigator.pushNamed(context, '/profile');
-    } else {
-      // Şimdilik başka client profili yok, dokunma
-    }
-  }
-
-  // ---------- DÜZENLE / SİL ----------
+  // ✅ ARTIK REPO
   void _showEditPostDialog(String postId, String currentText) {
     final controller = TextEditingController(text: currentText);
 
     showDialog(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Gönderiyi Düzenle'),
-          content: TextField(
-            controller: controller,
-            maxLines: 5,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-            ),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gönderiyi Düzenle'),
+        content: TextField(
+          controller: controller,
+          maxLines: 5,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('İptal'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-              },
-              child: const Text('İptal'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final newText = controller.text.trim();
-                if (newText.isEmpty) return;
+          ElevatedButton(
+            onPressed: () async {
+              final newText = controller.text.trim();
+              if (newText.isEmpty) return;
 
-                try {
-                  await FirebaseFirestore.instance
-                      .collection('posts')
-                      .doc(postId)
-                      .update({
-                    'text': newText,
-                    'editedAt': FieldValue.serverTimestamp(),
-                  });
-                  if (mounted) Navigator.pop(ctx);
-                } catch (e) {
-                  if (!mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Düzenlenemedi: $e')),
-                  );
-                }
-              },
-              child: const Text('Kaydet'),
-            ),
-          ],
-        );
-      },
+              try {
+                await _postRepo.updatePostText(
+                  postId: postId,
+                  newText: newText,
+                );
+                if (mounted) Navigator.pop(ctx);
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Düzenlenemedi: $e')),
+                );
+              }
+            },
+            child: const Text('Kaydet'),
+          ),
+        ],
+      ),
     );
   }
 
+  // ✅ ARTIK REPO
   void _confirmDeletePost(String postId) {
     showDialog(
       context: context,
@@ -681,10 +513,7 @@ class _FeedScreenState extends State<FeedScreen> {
           ElevatedButton(
             onPressed: () async {
               try {
-                await FirebaseFirestore.instance
-                    .collection('posts')
-                    .doc(postId)
-                    .delete();
+                await _postRepo.deletePost(postId);
                 if (mounted) Navigator.pop(ctx);
               } catch (e) {
                 if (!mounted) return;
@@ -700,7 +529,22 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  // ---------- SAHTE MEDYA BOX'LAR ----------
+  void _openAuthorProfile(String? authorId, String role) {
+    if (authorId == null) return;
+    final currentUserId = _currentUser?.uid;
+
+    if (role == 'expert') {
+      Navigator.pushNamed(
+        context,
+        '/publicExpertProfile',
+        arguments: authorId,
+      );
+    } else if (currentUserId != null && currentUserId == authorId) {
+      Navigator.pushNamed(context, '/profile');
+    }
+  }
+
+  // ---------- SAHTE MEDYA ----------
   Widget _buildFakeImageBox() {
     return Container(
       height: 160,
@@ -709,11 +553,7 @@ class _FeedScreenState extends State<FeedScreen> {
         borderRadius: BorderRadius.circular(12),
       ),
       child: const Center(
-        child: Icon(
-          Icons.image,
-          size: 48,
-          color: Colors.black54,
-        ),
+        child: Icon(Icons.image, size: 48, color: Colors.black54),
       ),
     );
   }
@@ -726,11 +566,7 @@ class _FeedScreenState extends State<FeedScreen> {
         borderRadius: BorderRadius.circular(12),
       ),
       child: const Center(
-        child: Icon(
-          Icons.play_circle_fill,
-          size: 56,
-          color: Colors.white,
-        ),
+        child: Icon(Icons.play_circle_fill, size: 56, color: Colors.white),
       ),
     );
   }
@@ -755,10 +591,11 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  // ---------- YARDIMCI FONKSİYONLAR ----------
+  // ---------- YARDIMCILAR ----------
   int _asInt(dynamic value) {
     if (value is int) return value;
     if (value is double) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
     return 0;
   }
 
@@ -789,16 +626,12 @@ class _FeedScreenState extends State<FeedScreen> {
         title: Text('Hoş geldin, ${_name ?? ''}'),
         actions: [
           IconButton(
-            onPressed: () {
-              Navigator.pushNamed(context, '/profile');
-            },
+            onPressed: () => Navigator.pushNamed(context, '/profile'),
             icon: const Icon(Icons.person),
-            tooltip: 'Profilim',
           ),
           IconButton(
             onPressed: _logout,
             icon: const Icon(Icons.logout),
-            tooltip: 'Çıkış yap',
           ),
         ],
       ),
@@ -821,16 +654,11 @@ class _FeedScreenState extends State<FeedScreen> {
 
             const Text(
               'Sosyal Akış',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
 
-            Expanded(
-              child: _buildFeedList(),
-            ),
+            Expanded(child: _buildFeedList()),
           ],
         ),
       ),

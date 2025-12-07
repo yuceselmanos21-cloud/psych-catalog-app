@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../repositories/firestore_test_repository.dart';
+
 class TestsListScreen extends StatefulWidget {
   const TestsListScreen({super.key});
 
@@ -9,6 +11,8 @@ class TestsListScreen extends StatefulWidget {
 }
 
 class _TestsListScreenState extends State<TestsListScreen> {
+  final _testRepo = FirestoreTestRepository();
+
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchText = '';
 
@@ -16,8 +20,10 @@ class _TestsListScreenState extends State<TestsListScreen> {
   void initState() {
     super.initState();
     _searchCtrl.addListener(() {
+      final txt = _searchCtrl.text.toLowerCase();
+      if (txt == _searchText) return;
       setState(() {
-        _searchText = _searchCtrl.text.toLowerCase();
+        _searchText = txt;
       });
     });
   }
@@ -69,6 +75,18 @@ class _TestsListScreenState extends State<TestsListScreen> {
     );
   }
 
+  bool _matchesSearch(Map<String, dynamic> data) {
+    if (_searchText.isEmpty) return true;
+
+    final title = data['title']?.toString().toLowerCase() ?? '';
+    final description = data['description']?.toString().toLowerCase() ?? '';
+    final expertName = data['expertName']?.toString().toLowerCase() ?? '';
+
+    return title.contains(_searchText) ||
+        description.contains(_searchText) ||
+        expertName.contains(_searchText);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -90,12 +108,10 @@ class _TestsListScreenState extends State<TestsListScreen> {
             ),
           ),
           const SizedBox(height: 4),
+
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('tests')
-                  .orderBy('createdAt', descending: true)
-                  .snapshots(),
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: _testRepo.watchAllTests(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -107,7 +123,7 @@ class _TestsListScreenState extends State<TestsListScreen> {
                   );
                 }
 
-                if (!snapshot.hasData) {
+                if (!snapshot.hasData || snapshot.data == null) {
                   return const Center(
                     child: Text('Henüz hiç test yok.'),
                   );
@@ -115,18 +131,15 @@ class _TestsListScreenState extends State<TestsListScreen> {
 
                 final allDocs = snapshot.data!.docs;
 
-                // 🔍 Arama filtresi (başlık + açıklama + uzman adı)
+                if (allDocs.isEmpty) {
+                  return const Center(
+                    child: Text('Henüz hiç test yok.'),
+                  );
+                }
+
                 final filteredDocs = allDocs.where((doc) {
-                  if (_searchText.isEmpty) return true;
-                  final data = doc.data() as Map<String, dynamic>? ?? {};
-                  final title = data['title']?.toString().toLowerCase() ?? '';
-                  final description =
-                      data['description']?.toString().toLowerCase() ?? '';
-                  final expertName =
-                      data['expertName']?.toString().toLowerCase() ?? '';
-                  return title.contains(_searchText) ||
-                      description.contains(_searchText) ||
-                      expertName.contains(_searchText);
+                  final data = doc.data();
+                  return _matchesSearch(data);
                 }).toList();
 
                 if (filteredDocs.isEmpty) {
@@ -139,7 +152,7 @@ class _TestsListScreenState extends State<TestsListScreen> {
                   itemCount: filteredDocs.length,
                   itemBuilder: (context, index) {
                     final doc = filteredDocs[index];
-                    final data = doc.data() as Map<String, dynamic>? ?? {};
+                    final data = doc.data();
 
                     final String title =
                         data['title']?.toString() ?? 'Başlıksız test';
@@ -149,8 +162,8 @@ class _TestsListScreenState extends State<TestsListScreen> {
                         data['expertName']?.toString() ?? 'Uzman';
                     final String answerType =
                         data['answerType']?.toString() ?? 'text';
-                    final Timestamp? ts =
-                    data['createdAt'] as Timestamp?;
+
+                    final Timestamp? ts = data['createdAt'] as Timestamp?;
                     final String dateStr = _formatDate(ts);
 
                     // SolveTestScreen'e gönderilecek map –
@@ -162,7 +175,9 @@ class _TestsListScreenState extends State<TestsListScreen> {
 
                     return Card(
                       margin: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 4),
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
                       child: InkWell(
                         onTap: () {
                           Navigator.pushNamed(

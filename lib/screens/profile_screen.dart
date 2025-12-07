@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../repositories/firestore_post_repository.dart';
+
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -20,6 +22,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _cityCtrl = TextEditingController();
   final _specialtiesCtrl = TextEditingController();
   final _aboutCtrl = TextEditingController();
+
+  final _postRepo = FirestorePostRepository();
 
   final List<String> _professionOptions = [
     'Psikolog',
@@ -84,9 +88,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _saveProfile() async {
     if (_uid == null) return;
 
-    setState(() {
-      _saving = true;
-    });
+    setState(() => _saving = true);
 
     try {
       await FirebaseFirestore.instance.collection('users').doc(_uid).update({
@@ -99,9 +101,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       await _loadUser();
       if (!mounted) return;
-      setState(() {
-        _editing = false;
-      });
+
+      setState(() => _editing = false);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Profil güncellendi.')),
@@ -113,9 +114,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     } finally {
       if (!mounted) return;
-      setState(() {
-        _saving = false;
-      });
+      setState(() => _saving = false);
     }
   }
 
@@ -182,7 +181,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
-                // Test çözme ekranına git (aynı /tests ekranındaki gibi)
                 Navigator.pushNamed(
                   context,
                   '/solveTest',
@@ -272,12 +270,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ✅ ARTIK REPO
   Future<void> _deletePost(String postId) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('posts')
-          .doc(postId)
-          .delete();
+      await _postRepo.deletePost(postId);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -291,16 +287,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  // ✅ ARTIK REPO
   Widget _buildMyPosts() {
     if (_uid == null) return const SizedBox.shrink();
 
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('posts')
-          .where('authorId', isEqualTo: _uid)
-          .orderBy('createdAt', descending: true)
-          .limit(10)
-          .snapshots(),
+      stream: _postRepo.watchPostsByAuthor(_uid!, limit: 10),
       builder: (context, snap) {
         if (snap.hasError) {
           return Text(
@@ -499,7 +491,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             const SizedBox(height: 16),
 
-            // GENEL BİLGİLER (Rol + Meslek)
+            // GENEL BİLGİLER
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -531,8 +523,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Expanded(
                           child: _editing && isExpert
                               ? DropdownButtonFormField<String>(
-                            value: _selectedProfession?.isNotEmpty ==
-                                true
+                            value: _selectedProfession?.isNotEmpty == true
                                 ? _selectedProfession
                                 : null,
                             decoration: const InputDecoration(
@@ -569,7 +560,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             const SizedBox(height: 12),
 
-            // UZMAN BİLGİLERİ (Şehir, Uzmanlık Alanı, Hakkında)
+            // UZMAN BİLGİLERİ
             if (isExpert)
               Card(
                 child: Padding(
@@ -584,7 +575,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       const SizedBox(height: 8),
 
-                      // Şehir
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
@@ -614,7 +604,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       const SizedBox(height: 8),
 
-                      // Uzmanlık Alanı
                       const Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
@@ -635,7 +624,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                       const SizedBox(height: 8),
 
-                      // Hakkında
                       const Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
@@ -660,7 +648,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             const SizedBox(height: 12),
 
-            // CV KARTI (sadece gösterim, yükleme yok – storage işini bekletiyoruz)
+            // CV KARTI
             if (cvUrl != null && cvUrl.isNotEmpty)
               Card(
                 child: ListTile(
@@ -683,15 +671,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                       : const Icon(Icons.save),
-                  label:
-                  Text(_saving ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'),
+                  label: Text(
+                      _saving ? 'Kaydediliyor...' : 'Değişiklikleri Kaydet'),
                 ),
               ),
             ],
 
             const SizedBox(height: 24),
 
-            // AKTİVİTELER
             const Text(
               'Aktivitelerim',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),

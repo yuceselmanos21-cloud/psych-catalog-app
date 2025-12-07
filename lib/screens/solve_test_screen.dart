@@ -1,7 +1,7 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../repositories/firestore_test_repository.dart';
 import 'analysis_service.dart'; // AI yorum için
 
 class SolveTestScreen extends StatefulWidget {
@@ -14,6 +14,8 @@ class SolveTestScreen extends StatefulWidget {
 }
 
 class _SolveTestScreenState extends State<SolveTestScreen> {
+  final _testRepo = FirestoreTestRepository();
+
   late final List<String> _questions;
   late final String _answerMode; // 'scale' veya 'text'
 
@@ -30,8 +32,9 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
   void initState() {
     super.initState();
 
-    final rawQuestions = widget.testData['questions'] as List<dynamic>? ?? [];
-    _questions = rawQuestions.map((e) => e.toString()).toList();
+    final rawQuestions = widget.testData['questions'];
+
+    _questions = _normalizeQuestions(rawQuestions);
 
     _answerMode = _detectAnswerMode(widget.testData);
 
@@ -55,15 +58,35 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
     super.dispose();
   }
 
+  /// questions eski/yeni formatla gelebilir:
+  /// - List<String>
+  /// - List<dynamic>
+  /// - List<Map {text: ...}>
+  List<String> _normalizeQuestions(dynamic raw) {
+    if (raw is List) {
+      return raw
+          .map((e) {
+        if (e is Map) {
+          final m = Map<String, dynamic>.from(e);
+          return m['text']?.toString() ?? e.toString();
+        }
+        return e.toString();
+      })
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+    }
+    return <String>[];
+  }
+
   /// Test belgesinden cevap modunu tespit etmeye çalışır.
   /// Daha önce ne isim verdiğimizi bilmediğimiz için ESNEK davranıyor.
   String _detectAnswerMode(Map<String, dynamic> data) {
-    final dynamic raw =
-        data['answerMode'] ??
-            data['answer_mode'] ??
-            data['answerType'] ??
-            data['answer_type'] ??
-            data['mode'];
+    final dynamic raw = data['answerMode'] ??
+        data['answer_mode'] ??
+        data['answerType'] ??
+        data['answer_type'] ??
+        data['mode'];
 
     final v = raw?.toString().toLowerCase() ?? '';
 
@@ -75,7 +98,6 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
       return 'scale';
     }
 
-    // varsayılan: metin
     return 'text';
   }
 
@@ -88,8 +110,20 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
+        if (!mounted) return;
         setState(() {
           _error = 'Oturum bulunamadı. Lütfen tekrar giriş yap.';
+        });
+        return;
+      }
+
+      final testId = widget.testData['id']?.toString() ?? '';
+      final testTitle = widget.testData['title']?.toString() ?? 'Test';
+
+      if (testId.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _error = 'Test kimliği eksik görünüyor.';
         });
         return;
       }
@@ -99,6 +133,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
 
       if (_answerMode == 'scale') {
         if (_scaleAnswers.any((v) => v == null)) {
+          if (!mounted) return;
           setState(() {
             _error = 'Lütfen tüm sorular için 1–5 arasında bir seçim yap.';
           });
@@ -107,6 +142,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
         answers = _scaleAnswers.map((e) => e!).toList();
       } else {
         if (_textControllers.any((c) => c.text.trim().isEmpty)) {
+          if (!mounted) return;
           setState(() {
             _error = 'Lütfen tüm sorulara cevap yaz.';
           });
@@ -141,26 +177,21 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
       try {
         aiText = await AnalysisService.generateAnalysis(prompt);
       } catch (e) {
-        // AI çökerse, yine de testi kaydedelim
         aiText = 'Yapay zekâ analizi alınırken bir hata oluştu: $e';
       }
 
-      // 4) Firestore'a kaydet (solvedTests)
-      final testId = widget.testData['id']?.toString();
-      final testTitle = widget.testData['title']?.toString() ?? 'Test';
+      // 4) Repo üzerinden kaydet (solvedTests)
+      await _testRepo.submitSolvedTestWithAnalysis(
+        userId: user.uid,
+        testId: testId,
+        testTitle: testTitle,
+        questions: _questions,
+        answers: answers,
+        answerMode: _answerMode,
+        aiAnalysis: aiText,
+      );
 
-      await FirebaseFirestore.instance.collection('solvedTests').add({
-        'userId': user.uid,
-        'testId': testId,
-        'testTitle': testTitle,
-        'questions': _questions,
-        'answers': answers,
-        'answerMode': _answerMode,
-        'aiAnalysis': aiText,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      // 5) Anlık sonuç ekranına yönlendir (Çözülen testler sayfasına gitmeden)
+      // 5) Anlık sonuç ekranına yönlendir
       if (!mounted) return;
 
       Navigator.pushReplacementNamed(
@@ -175,15 +206,15 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
         },
       );
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Test kaydedilirken bir hata oluştu: $e';
       });
     } finally {
-      if (mounted) {
-        setState(() {
-          _saving = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+      });
     }
   }
 
@@ -191,7 +222,6 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
     final soru = _questions[index];
 
     if (_answerMode == 'scale') {
-      // 1–5 arası sayısal cevap
       return Card(
         margin: const EdgeInsets.only(bottom: 12),
         child: Padding(
@@ -201,8 +231,10 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
             children: [
               Text(
                 'Soru ${index + 1}',
-                style:
-                const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
               ),
               const SizedBox(height: 4),
               Text(soru),
@@ -232,7 +264,6 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
         ),
       );
     } else {
-      // Metin cevap
       return Card(
         margin: const EdgeInsets.only(bottom: 12),
         child: Padding(
@@ -242,8 +273,10 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
             children: [
               Text(
                 'Soru ${index + 1}',
-                style:
-                const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
               ),
               const SizedBox(height: 4),
               Text(soru),
@@ -292,7 +325,6 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
                 ),
               ),
             const SizedBox(height: 12),
-
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -301,16 +333,13 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
                   style: const TextStyle(color: Colors.red),
                 ),
               ),
-
             Expanded(
               child: ListView.builder(
                 itemCount: _questions.length,
                 itemBuilder: (context, index) => _buildQuestionItem(index),
               ),
             ),
-
             const SizedBox(height: 8),
-
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
