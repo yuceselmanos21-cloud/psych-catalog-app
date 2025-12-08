@@ -1,58 +1,13 @@
-import 'test_repository.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'test_repository.dart';
 
 class FirestoreTestRepository implements TestRepository {
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
-
+  final FirebaseFirestore _db;
 
   FirestoreTestRepository({FirebaseFirestore? firestore})
       : _db = firestore ?? FirebaseFirestore.instance;
 
-  @override
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchSolvedTestsByUser(
-      String userId,
-      ) {
-    // where + orderBy kombinasyonu genelde sorunsuzdur.
-    // Eğer index isterse Firebase console yönlendirecek.
-    return _db
-        .collection('solvedTests')
-        .where('userId', isEqualTo: userId)
-        .orderBy('createdAt', descending: true)
-        .snapshots();
-  }
-
-  @override
-  Future<void> submitSolvedTestWithAnalysis({
-    required String userId,
-    required String testId,
-    required String testTitle,
-    required List<String> questions,
-    required List<dynamic> answers,
-    required String answerMode,
-    required String aiAnalysis,
-  }) async {
-    await _db.collection('solvedTests').add({
-      'userId': userId,
-      'testId': testId,
-      'testTitle': testTitle,
-      'questions': questions,
-      'answers': answers,
-      'answerMode': answerMode,
-      'aiAnalysis': aiAnalysis,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-  }
-
-  @override
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchSolvedTestsByTest(
-      String testId,
-      ) {
-    return _db
-        .collection('solvedTests')
-        .where('testId', isEqualTo: testId)
-        .snapshots();
-  }
-
+  // ---------------- TESTLER ----------------
 
   @override
   Stream<QuerySnapshot<Map<String, dynamic>>> watchAllTests() {
@@ -85,10 +40,16 @@ class FirestoreTestRepository implements TestRepository {
     required String answerType,
     String? expertName,
   }) async {
+    // Minimal temizlik (ekranların davranışını bozmaz)
+    final cleanQuestions = questions
+        .map((q) => q.trim())
+        .where((q) => q.isNotEmpty)
+        .toList();
+
     final doc = await _db.collection('tests').add({
       'title': title.trim(),
       'description': description.trim(),
-      'questions': questions, // ✅ eski yapıyı bozma
+      'questions': cleanQuestions, // ✅ eski yapıyı bozma
       'answerType': answerType, // ✅ scale/text
       'createdBy': createdBy,
       if (expertName != null && expertName.trim().isNotEmpty)
@@ -99,19 +60,44 @@ class FirestoreTestRepository implements TestRepository {
     return doc.id;
   }
 
-
   @override
   Future<void> deleteTest(String testId) async {
     await _db.collection('tests').doc(testId).delete();
   }
 
+  // ---------------- ÇÖZÜLEN TESTLER ----------------
+
   @override
-  Future<void> submitSolvedTest({
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchSolvedTestsByUser(
+      String userId,
+      ) {
+    return _db
+        .collection('solvedTests')
+        .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  @override
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchSolvedTestsByTest(
+      String testId,
+      ) {
+    // Count için ideal: index yükünü artırmamak adına orderBy yok.
+    return _db
+        .collection('solvedTests')
+        .where('testId', isEqualTo: testId)
+        .snapshots();
+  }
+
+  @override
+  Future<void> submitSolvedTestWithAnalysis({
     required String userId,
     required String testId,
     required String testTitle,
-    required List<Map<String, dynamic>> questions,
-    required List<Map<String, dynamic>> answers,
+    required List<String> questions,
+    required List<dynamic> answers,
+    required String answerMode,
+    required String aiAnalysis,
   }) async {
     await _db.collection('solvedTests').add({
       'userId': userId,
@@ -119,18 +105,43 @@ class FirestoreTestRepository implements TestRepository {
       'testTitle': testTitle,
       'questions': questions,
       'answers': answers,
+      'answerMode': answerMode,
+      'aiAnalysis': aiAnalysis,
       'createdAt': FieldValue.serverTimestamp(),
-      'aiAnalysis': '', // ileride dolduracağız
     });
   }
 
+  // ✅ Eski kodlar kırılmasın diye
   @override
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchSolvedTestsByUser(
-      String userId) {
-    return _db
-        .collection('solvedTests')
-        .where('userId', isEqualTo: userId)
-        .orderBy('createdAt', descending: true)
-        .snapshots();
+  Future<void> submitSolvedTest({
+    required String userId,
+    required String testId,
+    required String testTitle,
+    required List<dynamic> questions,
+    required List<dynamic> answers,
+  }) async {
+    final mode = _inferAnswerMode(answers);
+
+    await _db.collection('solvedTests').add({
+      'userId': userId,
+      'testId': testId,
+      'testTitle': testTitle,
+      'questions': questions,
+      'answers': answers,
+      'answerMode': mode,
+      'aiAnalysis': '',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  String _inferAnswerMode(List<dynamic> answers) {
+    // Basit ve güvenli tahmin:
+    final allInts = answers.every((a) => a is int);
+    if (allInts) {
+      final okRange =
+      answers.whereType<int>().every((v) => v >= 1 && v <= 5);
+      if (okRange) return 'scale';
+    }
+    return 'text';
   }
 }

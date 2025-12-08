@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -24,6 +25,63 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
   String? _error;
   String? _success;
 
+  // ✅ sadece expert test oluşturabilsin
+  bool _roleLoading = true;
+  bool _isExpert = false;
+  String? _expertName;
+
+  User? get _user => FirebaseAuth.instance.currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRoleAndName();
+
+    // ✅ soru sayacı canlı güncellensin
+    _questionsCtrl.addListener(() {
+      if (!mounted) return;
+      setState(() {});
+    });
+  }
+
+  Future<void> _loadRoleAndName() async {
+    final user = _user;
+    if (user == null) {
+      if (!mounted) return;
+      setState(() {
+        _roleLoading = false;
+        _isExpert = false;
+        _expertName = null;
+      });
+      return;
+    }
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final data = snap.data() ?? <String, dynamic>{};
+      final role = (data['role'] ?? 'client').toString();
+      final name = (data['name'] ?? '').toString().trim();
+
+      if (!mounted) return;
+      setState(() {
+        _isExpert = role == 'expert';
+        _expertName = name.isNotEmpty ? name : null;
+        _roleLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isExpert = false;
+        _expertName = null;
+        _roleLoading = false;
+      });
+    }
+  }
+
   @override
   void dispose() {
     _titleCtrl.dispose();
@@ -48,11 +106,19 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
     });
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
+      final user = _user;
       if (user == null) {
         if (!mounted) return;
         setState(() {
           _error = 'Oturum bulunamadı. Lütfen tekrar giriş yapın.';
+        });
+        return;
+      }
+
+      if (!_isExpert) {
+        if (!mounted) return;
+        setState(() {
+          _error = 'Sadece uzmanlar test oluşturabilir.';
         });
         return;
       }
@@ -69,6 +135,14 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
         return;
       }
 
+      if (title.length < 3) {
+        if (!mounted) return;
+        setState(() {
+          _error = 'Test başlığı çok kısa.';
+        });
+        return;
+      }
+
       if (questions.isEmpty) {
         if (!mounted) return;
         setState(() {
@@ -77,13 +151,21 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
         return;
       }
 
+      if (questions.length > 50) {
+        if (!mounted) return;
+        setState(() {
+          _error = 'Şimdilik en fazla 50 soru ekleyebilirsin.';
+        });
+        return;
+      }
+
       await _testRepo.createTest(
         title: title,
         description: description,
         createdBy: user.uid,
-        questions: questions,
-        answerType: _answerType,
-        // expertName: ileride UserRepository ile dolduracağız
+        questions: questions, // ✅ eski yapıyı bozma
+        answerType: _answerType, // ✅ scale/text
+        expertName: _expertName, // ✅ opsiyonel, varsa yazar
       );
 
       if (!mounted) return;
@@ -131,6 +213,31 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ const/AppBar hatası bu şekilde giderildi
+    if (_roleLoading) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Test Oluştur')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (!_isExpert) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Test Oluştur')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              'Bu sayfa sadece uzmanlara açıktır.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final questionCount = _parseQuestions(_questionsCtrl.text).length;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Test Oluştur'),
@@ -141,12 +248,14 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
           children: [
             TextField(
               controller: _titleCtrl,
+              textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
                 labelText: 'Test Başlığı',
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 12),
+
             TextField(
               controller: _descCtrl,
               maxLines: 3,
@@ -157,12 +266,11 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
             ),
             const SizedBox(height: 16),
 
-            // ---- Cevap tipi seçimi ----
-            Align(
+            const Align(
               alignment: Alignment.centerLeft,
               child: Text(
                 'Cevap Tipi',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),
@@ -172,18 +280,30 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
             _buildAnswerTypeSelector(),
             const SizedBox(height: 16),
 
-            // ---- Sorular alanı (her satıra 1 soru) ----
             Align(
               alignment: Alignment.centerLeft,
-              child: Text(
-                'Sorular',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: Row(
+                children: [
+                  const Text(
+                    'Sorular',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '($questionCount)',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 8),
+
             TextField(
               controller: _questionsCtrl,
               maxLines: 10,

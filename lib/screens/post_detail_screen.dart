@@ -19,6 +19,7 @@ class PostDetailScreen extends StatefulWidget {
 class _PostDetailScreenState extends State<PostDetailScreen> {
   final TextEditingController _replyCtrl = TextEditingController();
   bool _sendingReply = false;
+  bool _reposting = false;
 
   final _postRepo = FirestorePostRepository();
 
@@ -101,6 +102,42 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     } finally {
       if (!mounted) return;
       setState(() => _sendingReply = false);
+    }
+  }
+
+  Future<void> _handleRepost({
+    required String text,
+    required String type,
+  }) async {
+    final user = _currentUser;
+    if (user == null) return;
+
+    if (_reposting) return;
+
+    setState(() => _reposting = true);
+
+    try {
+      await _postRepo.repostPost(
+        originalPostId: widget.postId,
+        text: text,
+        type: type,
+        authorId: user.uid,
+        authorName: _currentUserName,
+        authorRole: _currentUserRole,
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Repost yapıldı.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Repost yapılamadı: $e')),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() => _reposting = false);
     }
   }
 
@@ -196,6 +233,53 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     );
   }
 
+  // ---------- SAHTE MEDYA (DETAIL İÇİN DE TUTARLI) ----------
+  Widget _buildFakeImageBox() {
+    return Container(
+      height: 180,
+      decoration: BoxDecoration(
+        color: Colors.grey[300],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Center(
+        child: Icon(Icons.image, size: 56, color: Colors.black54),
+      ),
+    );
+  }
+
+  Widget _buildFakeVideoBox() {
+    return Container(
+      height: 180,
+      decoration: BoxDecoration(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Center(
+        child: Icon(Icons.play_circle_fill, size: 64, color: Colors.white),
+      ),
+    );
+  }
+
+  Widget _buildFakeAudioBox() {
+    return Container(
+      height: 70,
+      decoration: BoxDecoration(
+        color: Colors.deepPurple.shade50,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: const [
+          Icon(Icons.graphic_eq, color: Colors.deepPurple),
+          SizedBox(width: 8),
+          Text('Ses kaydı (örnek alan)'),
+          Spacer(),
+          Icon(Icons.play_arrow),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUserId = _currentUser?.uid;
@@ -220,6 +304,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           final authorName = data['authorName']?.toString() ?? 'Kullanıcı';
           final authorId = data['authorId']?.toString();
           final role = data['authorRole']?.toString() ?? 'client';
+          final postType = data['type']?.toString() ?? 'text';
 
           final ts = data['createdAt'] as Timestamp?;
           final createdAt = ts?.toDate();
@@ -248,6 +333,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // -------- Ana Post Kartı --------
                       Card(
                         child: Padding(
                           padding: const EdgeInsets.all(12),
@@ -322,11 +408,23 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 ],
                               ),
                               const SizedBox(height: 12),
-                              Text(
-                                text,
-                                style: const TextStyle(fontSize: 16),
-                              ),
-                              const SizedBox(height: 12),
+
+                              if (text.isNotEmpty)
+                                Text(
+                                  text,
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+
+                              if (text.isNotEmpty) const SizedBox(height: 12),
+
+                              // ✅ Post tipine göre fake medya alanı
+                              if (postType == 'image') _buildFakeImageBox(),
+                              if (postType == 'video') _buildFakeVideoBox(),
+                              if (postType == 'audio') _buildFakeAudioBox(),
+
+                              if (postType != 'text')
+                                const SizedBox(height: 12),
+
                               if (createdAt != null)
                                 Text(
                                   _formatDateTime(createdAt) +
@@ -340,6 +438,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 ),
                               const SizedBox(height: 12),
 
+                              // Sayılar
                               Row(
                                 children: [
                                   Text(
@@ -369,22 +468,34 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                               const SizedBox(height: 8),
 
+                              // Aksiyonlar
                               Row(
                                 mainAxisAlignment:
                                 MainAxisAlignment.spaceBetween,
                                 children: [
                                   IconButton(
-                                    icon: const Icon(
-                                      Icons.mode_comment_outlined,
-                                    ),
-                                    onPressed: () {},
+                                    icon:
+                                    const Icon(Icons.mode_comment_outlined),
+                                    onPressed: () {
+                                      // Basit tutuyoruz.
+                                      // İleride scroll-to-reply eklenebilir.
+                                    },
                                   ),
                                   IconButton(
-                                    icon: const Icon(Icons.repeat),
-                                    onPressed: () {
-                                      // Şimdilik boş bırakıyoruz.
-                                      // İstersen bir sonraki adımda repost’u da repo’ya ekleriz.
-                                    },
+                                    icon: _reposting
+                                        ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                        : const Icon(Icons.repeat),
+                                    onPressed: _reposting
+                                        ? null
+                                        : () => _handleRepost(
+                                      text: text,
+                                      type: postType,
+                                    ),
                                   ),
                                   IconButton(
                                     icon: Icon(
@@ -420,6 +531,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       ),
                       const SizedBox(height: 8),
 
+                      // -------- Yanıtlar --------
                       StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                         stream: _postRepo.watchReplies(widget.postId),
                         builder: (context, replySnap) {
@@ -494,6 +606,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 ),
               ),
 
+              // -------- Alt Reply Composer --------
               SafeArea(
                 child: Container(
                   padding:
@@ -528,7 +641,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ? const SizedBox(
                           width: 16,
                           height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child:
+                          CircularProgressIndicator(strokeWidth: 2),
                         )
                             : const Icon(Icons.send),
                         onPressed: _sendingReply ? null : _sendReply,

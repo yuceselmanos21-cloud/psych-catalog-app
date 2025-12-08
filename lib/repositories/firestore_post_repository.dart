@@ -54,11 +54,16 @@ class FirestorePostRepository implements PostRepository {
 
   // ---------------- OKUMA ----------------
   @override
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchFeed() {
-    return _db
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchFeed({int? limit}) {
+    Query<Map<String, dynamic>> q = _db
         .collection('posts')
-        .orderBy('createdAt', descending: true)
-        .snapshots();
+        .orderBy('createdAt', descending: true);
+
+    if (limit != null && limit > 0) {
+      q = q.limit(limit);
+    }
+
+    return q.snapshots();
   }
 
   @override
@@ -67,12 +72,33 @@ class FirestorePostRepository implements PostRepository {
   }
 
   @override
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchReplies(String postId) {
-    return _db
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchReplies(
+      String postId, {
+        int? limit,
+      }) {
+    Query<Map<String, dynamic>> q = _db
         .collection('posts')
         .doc(postId)
         .collection('replies')
+        .orderBy('createdAt', descending: true);
+
+    if (limit != null && limit > 0) {
+      q = q.limit(limit);
+    }
+
+    return q.snapshots();
+  }
+
+  @override
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchPostsByAuthor(
+      String authorId, {
+        int limit = 10,
+      }) {
+    return _db
+        .collection('posts')
+        .where('authorId', isEqualTo: authorId)
         .orderBy('createdAt', descending: true)
+        .limit(limit)
         .snapshots();
   }
 
@@ -142,7 +168,7 @@ class FirestorePostRepository implements PostRepository {
     });
   }
 
-  // ---------------- REPOST ----------------
+  // ---------------- REPOST (✅ daha sağlam) ----------------
   @override
   Future<void> repostPost({
     required String originalPostId,
@@ -153,12 +179,15 @@ class FirestorePostRepository implements PostRepository {
     required String authorRole,
   }) async {
     final originalRef = _db.collection('posts').doc(originalPostId);
+    final newRef = _db.collection('posts').doc();
 
-    await originalRef.update({
+    final batch = _db.batch();
+
+    batch.update(originalRef, {
       'repostCount': FieldValue.increment(1),
     });
 
-    await _db.collection('posts').add({
+    batch.set(newRef, {
       'text': text,
       'authorId': authorId,
       'authorName': authorName,
@@ -168,6 +197,8 @@ class FirestorePostRepository implements PostRepository {
       ..._baseTwitterFields(),
       'repostOfPostId': originalPostId,
     });
+
+    await batch.commit();
   }
 
   // ---------------- DÜZENLE ----------------
@@ -192,17 +223,4 @@ class FirestorePostRepository implements PostRepository {
     // Replies alt koleksiyonu otomatik silinmez.
     // İleride Cloud Function ile temizleyebiliriz.
   }
-  @override
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchPostsByAuthor(
-      String authorId, {
-        int limit = 10,
-      }) {
-    return _db
-        .collection('posts')
-        .where('authorId', isEqualTo: authorId)
-        .orderBy('createdAt', descending: true)
-        .limit(limit)
-        .snapshots();
-  }
-
 }

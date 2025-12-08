@@ -42,7 +42,6 @@ class _TestsListScreenState extends State<TestsListScreen> {
         '${dt.year}';
   }
 
-  /// Cevap tipini (answerType) ekranda güzel gösterelim
   Widget _buildAnswerTypeChip(String answerType) {
     String label;
     IconData icon;
@@ -55,7 +54,6 @@ class _TestsListScreenState extends State<TestsListScreen> {
       bg = Colors.deepPurple.shade50;
       fg = Colors.deepPurple;
     } else {
-      // varsayılan: text
       label = 'Serbest metin';
       icon = Icons.text_fields;
       bg = Colors.blueGrey.shade50;
@@ -95,7 +93,6 @@ class _TestsListScreenState extends State<TestsListScreen> {
       ),
       body: Column(
         children: [
-          // Arama kutusu
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: TextField(
@@ -148,6 +145,17 @@ class _TestsListScreenState extends State<TestsListScreen> {
                   );
                 }
 
+                // ✅ küçük stabilite: tarih sırası garanti
+                filteredDocs.sort((a, b) {
+                  final aTs = a.data()['createdAt'] as Timestamp?;
+                  final bTs = b.data()['createdAt'] as Timestamp?;
+                  final aTime =
+                      aTs?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+                  final bTime =
+                      bTs?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+                  return bTime.compareTo(aTime);
+                });
+
                 return ListView.builder(
                   itemCount: filteredDocs.length,
                   itemBuilder: (context, index) {
@@ -166,11 +174,11 @@ class _TestsListScreenState extends State<TestsListScreen> {
                     final Timestamp? ts = data['createdAt'] as Timestamp?;
                     final String dateStr = _formatDate(ts);
 
-                    // SolveTestScreen'e gönderilecek map –
-                    // önceki davranışı bozmayalım:
+                    // ✅ SolveTestScreen'e tam veri veriyoruz (eski davranışı bozmaz)
                     final Map<String, dynamic> test = {
                       'id': doc.id,
                       ...data,
+                      'answerType': answerType,
                     };
 
                     return Card(
@@ -191,7 +199,6 @@ class _TestsListScreenState extends State<TestsListScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Üst satır: Başlık + tarih
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -226,7 +233,6 @@ class _TestsListScreenState extends State<TestsListScreen> {
 
                               const SizedBox(height: 8),
 
-                              // Uzman adı + cevap tipi chip’i
                               Row(
                                 children: [
                                   Expanded(

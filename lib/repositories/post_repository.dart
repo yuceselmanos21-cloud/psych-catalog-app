@@ -7,18 +7,18 @@ abstract class PostRepository {
         String? authorId,
         String? authorName,
         String? authorRole, // 'expert' / 'client'
-        String type, // text / image / video / audio
+        String type = 'text', // text / image / video / audio
       });
 
   // FEED + DETAY OKUMA
   Stream<QuerySnapshot<Map<String, dynamic>>> watchFeed();
   Stream<DocumentSnapshot<Map<String, dynamic>>> watchPost(String postId);
   Stream<QuerySnapshot<Map<String, dynamic>>> watchReplies(String postId);
+
   Stream<QuerySnapshot<Map<String, dynamic>>> watchPostsByAuthor(
       String authorId, {
         int limit = 10,
       });
-
 
   // ETKİLEŞİMLER
   Future<void> addReply({

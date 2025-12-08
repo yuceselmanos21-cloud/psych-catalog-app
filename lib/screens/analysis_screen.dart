@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-
 import 'analysis_service.dart';
 
 class AnalysisScreen extends StatefulWidget {
@@ -15,6 +14,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   String? _result;
   String? _error;
 
+  DateTime? _lastRequestAt;
+  static const Duration _cooldown = Duration(seconds: 8);
+
+  bool get _isCoolingDown {
+    if (_lastRequestAt == null) return false;
+    return DateTime.now().difference(_lastRequestAt!) < _cooldown;
+  }
+
   @override
   void dispose() {
     _textCtrl.dispose();
@@ -23,6 +30,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
   Future<void> _runAnalysis() async {
     final input = _textCtrl.text.trim();
+
     if (input.isEmpty) {
       setState(() {
         _error = 'Lütfen analiz için bir metin girin.';
@@ -31,22 +39,28 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       return;
     }
 
+    if (_loading || _isCoolingDown) return;
+
     setState(() {
       _loading = true;
       _error = null;
+      _lastRequestAt = DateTime.now();
     });
 
     try {
       final response = await AnalysisService.generateAnalysis(input);
+      if (!mounted) return;
       setState(() {
         _result = response;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Analiz sırasında hata oluştu: $e';
         _result = null;
       });
     } finally {
+      if (!mounted) return;
       setState(() {
         _loading = false;
       });
@@ -55,6 +69,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final disabled = _loading || _isCoolingDown;
+
     return Scaffold(
       appBar: AppBar(title: const Text('AI Analizi')),
       body: Padding(
@@ -74,14 +90,18 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: _loading ? null : _runAnalysis,
+                onPressed: disabled ? null : _runAnalysis,
                 child: _loading
                     ? const SizedBox(
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-                    : const Text('Analiz Et'),
+                    : Text(
+                  _isCoolingDown
+                      ? 'Kısa bir ara ver...'
+                      : 'Analiz Et',
+                ),
               ),
             ),
             const SizedBox(height: 16),

@@ -32,7 +32,6 @@ class TestsScreen extends StatelessWidget {
         title: const Text('Tüm Testler'),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        // ✅ Firestore çağrısı ekrandan kalktı
         stream: testRepo.watchAllTests(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
@@ -51,7 +50,6 @@ class TestsScreen extends StatelessWidget {
 
           final docs = snapshot.data!.docs.toList();
 
-          // ✅ Ekstra güvenlik: createdAt yoksa bile sıralama düzgün kalsın
           docs.sort((a, b) {
             final aTs = a.data()['createdAt'] as Timestamp?;
             final bTs = b.data()['createdAt'] as Timestamp?;
@@ -87,7 +85,6 @@ class TestsScreen extends StatelessWidget {
                   ),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
-                    // ✅ Eski davranışı bozma:
                     Navigator.pushNamed(
                       context,
                       '/solveTest',

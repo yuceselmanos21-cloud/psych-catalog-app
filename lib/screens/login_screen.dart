@@ -14,6 +14,13 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   String? _error;
 
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _login() async {
     setState(() {
       _loading = true;
@@ -29,19 +36,12 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/feed');
     } on FirebaseAuthException catch (e) {
-      setState(() {
-        _error = e.message;
-      });
+      setState(() => _error = e.message);
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-      });
+      setState(() => _error = e.toString());
     } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() => _loading = false);
     }
   }
 
@@ -65,6 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 24),
               TextField(
                 controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
                 decoration: const InputDecoration(
                   labelText: 'Email',
                   border: OutlineInputBorder(),
@@ -91,7 +92,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: ElevatedButton(
                   onPressed: _loading ? null : _login,
                   child: _loading
-                      ? const CircularProgressIndicator()
+                      ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                       : const Text('Giriş Yap'),
                 ),
               ),

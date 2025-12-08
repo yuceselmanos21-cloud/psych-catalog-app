@@ -1,11 +1,6 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:file_picker/file_picker.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -19,21 +14,16 @@ class _SignupScreenState extends State<SignupScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
-  final _specializationCtrl = TextEditingController(); // Uzmanlık alanı
-  final _bioCtrl = TextEditingController();
+  final _specialtiesCtrl = TextEditingController();
+  final _aboutCtrl = TextEditingController();
 
-  String _role = 'client'; // client / expert
-  String? _selectedProfession; // Meslek
+  String _role = 'client';
+  String? _selectedProfession;
+
   bool _loading = false;
   String? _error;
 
-  // Fotoğraf ve CV için
-  final ImagePicker _imagePicker = ImagePicker();
-  Uint8List? _imageBytes;
-  Uint8List? _cvBytes;
-  String? _cvFileName;
-
-  final List<String> professions = [
+  final List<String> professions = const [
     "Psikolog",
     "Klinik Psikolog",
     "Nöropsikolog",
@@ -49,56 +39,43 @@ class _SignupScreenState extends State<SignupScreen> {
     _emailCtrl.dispose();
     _passCtrl.dispose();
     _cityCtrl.dispose();
-    _specializationCtrl.dispose();
-    _bioCtrl.dispose();
+    _specialtiesCtrl.dispose();
+    _aboutCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
-    try {
-      final picked = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 80,
-      );
-      if (picked == null) return;
+  bool _validate() {
+    final name = _nameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+    final pass = _passCtrl.text.trim();
+    final city = _cityCtrl.text.trim();
 
-      final bytes = await picked.readAsBytes();
-      setState(() {
-        _imageBytes = bytes;
-      });
-    } catch (e) {
-      setState(() {
-        _error = 'Fotoğraf seçilirken hata oluştu: $e';
-      });
+    if (name.isEmpty) {
+      _error = 'İsim boş olamaz.';
+      return false;
     }
-  }
+    if (email.isEmpty || !email.contains('@')) {
+      _error = 'Geçerli bir email gir.';
+      return false;
+    }
+    if (pass.length < 6) {
+      _error = 'Şifre en az 6 karakter olmalı.';
+      return false;
+    }
+    if (city.isEmpty) {
+      _error = 'Şehir boş olamaz.';
+      return false;
+    }
 
-  Future<void> _pickCv() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf', 'doc', 'docx'],
-        withData: true,
-      );
-      if (result == null || result.files.isEmpty) return;
-
-      final file = result.files.first;
-      if (file.bytes == null) {
-        setState(() {
-          _error = 'CV dosyasının içeriği okunamadı.';
-        });
-        return;
+    if (_role == 'expert') {
+      if ((_selectedProfession ?? '').trim().isEmpty) {
+        _error = 'Uzman için meslek seçmelisin.';
+        return false;
       }
-
-      setState(() {
-        _cvBytes = file.bytes;
-        _cvFileName = file.name;
-      });
-    } catch (e) {
-      setState(() {
-        _error = 'CV seçilirken hata oluştu: $e';
-      });
     }
+
+    _error = null;
+    return true;
   }
 
   Future<void> _signup() async {
@@ -108,78 +85,61 @@ class _SignupScreenState extends State<SignupScreen> {
     });
 
     try {
-      // 1) Auth hesabı oluştur
+      if (!_validate()) {
+        setState(() => _loading = false);
+        return;
+      }
+
       final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: _emailCtrl.text.trim(),
         password: _passCtrl.text.trim(),
       );
 
       final uid = cred.user!.uid;
+      final isExpert = _role == 'expert';
 
-      // 2) Profil fotoğrafını Storage'a yükle (varsa)
-      String? photoUrl;
-      if (_imageBytes != null) {
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('user_avatars')
-            .child('$uid.jpg');
-
-        await ref.putData(
-          _imageBytes!,
-          SettableMetadata(contentType: 'image/jpeg'),
-        );
-
-        photoUrl = await ref.getDownloadURL();
-        await cred.user!.updatePhotoURL(photoUrl);
-      }
-
-      // 3) CV'yi Storage'a yükle (sadece uzman ve varsa)
-      String? cvUrl;
-      if (_role == 'expert' && _cvBytes != null) {
-        String ext = 'pdf';
-        if (_cvFileName != null && _cvFileName!.contains('.')) {
-          ext = _cvFileName!.split('.').last;
-        }
-
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('user_cvs')
-            .child('${uid}_cv.$ext');
-
-        await ref.putData(
-          _cvBytes!,
-          SettableMetadata(contentType: 'application/octet-stream'),
-        );
-
-        cvUrl = await ref.getDownloadURL();
-      }
-
-      // 4) Firestore'a kullanıcı kaydı
       await FirebaseFirestore.instance.collection('users').doc(uid).set({
         'name': _nameCtrl.text.trim(),
         'email': _emailCtrl.text.trim(),
         'role': _role,
         'city': _cityCtrl.text.trim(),
-        'profession': _role == 'expert' ? _selectedProfession : null,
-        'specialization':
-        _role == 'expert' ? _specializationCtrl.text.trim() : null,
-        'bio': _role == 'expert' ? _bioCtrl.text.trim() : null,
-        'photoUrl': photoUrl ?? '',
-        'cvUrl': cvUrl ?? '',
+
+        // ✅ Profile/Experts/Public ile uyum
+        'profession': isExpert ? (_selectedProfession ?? '') : '',
+        'specialties': isExpert ? _specialtiesCtrl.text.trim() : '',
+        'about': _aboutCtrl.text.trim(),
+
+        // ✅ Storage yokken boş tutulur
+        'photoUrl': '',
+        'cvUrl': '',
+
+        // ✅ Follow V1 hazırlık
+        'followersCount': 0,
+        'followingCount': 0,
+
         'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, '/feed');
     } on FirebaseAuthException catch (e) {
-      setState(() {
-        _error = e.message;
-      });
+      String msg = e.message ?? 'Kayıt başarısız.';
+      if (e.code == 'email-already-in-use') {
+        msg = 'Bu e-posta zaten kullanımda.';
+      } else if (e.code == 'weak-password') {
+        msg = 'Şifre çok zayıf.';
+      } else if (e.code == 'invalid-email') {
+        msg = 'Geçersiz e-posta.';
+      }
+
+      if (!mounted) return;
+      setState(() => _error = msg);
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-      });
+      if (!mounted) return;
+      setState(() => _error = e.toString());
     } finally {
+      if (!mounted) return;
       setState(() => _loading = false);
     }
   }
@@ -194,35 +154,14 @@ class _SignupScreenState extends State<SignupScreen> {
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            // 🔹 PROFİL FOTOĞRAFI (HER İKİ ROL İÇİN)
-            Center(
-              child: Column(
-                children: [
-                  CircleAvatar(
-                    radius: 40,
-                    backgroundColor: Colors.purple.shade100,
-                    backgroundImage:
-                    _imageBytes != null ? MemoryImage(_imageBytes!) : null,
-                    child: _imageBytes == null
-                        ? const Icon(
-                      Icons.person,
-                      size: 40,
-                      color: Colors.white,
-                    )
-                        : null,
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: _pickImage,
-                    icon: const Icon(Icons.photo_camera),
-                    label: const Text('Fotoğraf Seç'),
-                  ),
-                ],
-              ),
+            // Basit header
+            CircleAvatar(
+              radius: 40,
+              backgroundColor: Colors.purple.shade100,
+              child: const Icon(Icons.person, size: 40, color: Colors.white),
             ),
             const SizedBox(height: 16),
 
-            // İSİM
             TextField(
               controller: _nameCtrl,
               decoration: const InputDecoration(
@@ -232,7 +171,6 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
             const SizedBox(height: 12),
 
-            // E-POSTA
             TextField(
               controller: _emailCtrl,
               decoration: const InputDecoration(
@@ -242,7 +180,6 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
             const SizedBox(height: 12),
 
-            // ŞİFRE
             TextField(
               controller: _passCtrl,
               obscureText: true,
@@ -253,7 +190,6 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
             const SizedBox(height: 12),
 
-            // ŞEHİR (herkes için)
             TextField(
               controller: _cityCtrl,
               decoration: const InputDecoration(
@@ -263,7 +199,6 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
             const SizedBox(height: 12),
 
-            // ROL
             DropdownButtonFormField<String>(
               value: _role,
               decoration: const InputDecoration(
@@ -277,14 +212,16 @@ class _SignupScreenState extends State<SignupScreen> {
               onChanged: (v) {
                 setState(() {
                   _role = v ?? 'client';
+                  if (_role == 'client') {
+                    _selectedProfession = null;
+                    _specialtiesCtrl.clear();
+                  }
                 });
               },
             ),
             const SizedBox(height: 12),
 
-            // UZMAN ALANLARI
             if (isExpert) ...[
-              // MESLEK
               DropdownButtonFormField<String>(
                 value: _selectedProfession,
                 decoration: const InputDecoration(
@@ -294,71 +231,39 @@ class _SignupScreenState extends State<SignupScreen> {
                 items: professions
                     .map((p) => DropdownMenuItem(value: p, child: Text(p)))
                     .toList(),
-                onChanged: (v) {
-                  setState(() {
-                    _selectedProfession = v;
-                  });
-                },
+                onChanged: (v) => setState(() => _selectedProfession = v),
               ),
               const SizedBox(height: 12),
 
-              // UZMANLIK ALANI
               TextField(
-                controller: _specializationCtrl,
+                controller: _specialtiesCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Uzmanlık Alanı',
                   border: OutlineInputBorder(),
                 ),
+                maxLines: 2,
               ),
               const SizedBox(height: 12),
+            ],
 
-              // KISA BİYOGRAFİ
-              TextField(
-                controller: _bioCtrl,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Kendinizi Tanıtın',
-                  border: OutlineInputBorder(),
-                ),
+            TextField(
+              controller: _aboutCtrl,
+              maxLines: 3,
+              decoration: InputDecoration(
+                labelText:
+                isExpert ? 'Hakkımda' : 'Hakkımda (isteğe bağlı)',
+                border: const OutlineInputBorder(),
               ),
-              const SizedBox(height: 12),
+            ),
+            const SizedBox(height: 12),
 
-              // 🔹 CV YÜKLEME
+            if (_error != null)
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'CV Yükle (PDF / DOC / DOCX)',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade800,
-                  ),
+                  _error!,
+                  style: const TextStyle(color: Colors.red),
                 ),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _cvFileName ?? 'Henüz seçilmedi',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    onPressed: _pickCv,
-                    icon: const Icon(Icons.upload_file),
-                    label: const Text('CV Seç'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            if (_error != null)
-              Text(
-                _error!,
-                style: const TextStyle(color: Colors.red),
               ),
 
             const SizedBox(height: 16),
@@ -368,7 +273,11 @@ class _SignupScreenState extends State<SignupScreen> {
               child: ElevatedButton(
                 onPressed: _loading ? null : _signup,
                 child: _loading
-                    ? const CircularProgressIndicator()
+                    ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
                     : const Text('Kayıt Ol'),
               ),
             ),

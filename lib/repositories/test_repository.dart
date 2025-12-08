@@ -1,16 +1,26 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 abstract class TestRepository {
-  // TESTLER
+  // ---------------- TESTLER ----------------
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchAllTests();
   Stream<QuerySnapshot<Map<String, dynamic>>> watchTestsByCreator(String uid);
   Stream<DocumentSnapshot<Map<String, dynamic>>> watchTest(String testId);
-  @override
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchAllTests() {
-    return _db
-        .collection('tests')
-        .orderBy('createdAt', descending: true)
-        .snapshots();
-  }
+
+  Future<String> createTest({
+    required String title,
+    required String description,
+    required String createdBy,
+    required List<String> questions,
+    required String answerType, // 'scale' | 'text'
+    String? expertName,
+  });
+
+  Future<void> deleteTest(String testId);
+
+  // ---------------- ÇÖZÜLEN TESTLER ----------------
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchSolvedTestsByUser(
+      String userId,
+      );
 
   Stream<QuerySnapshot<Map<String, dynamic>>> watchSolvedTestsByTest(
       String testId,
@@ -26,28 +36,13 @@ abstract class TestRepository {
     required String aiAnalysis,
   });
 
-  Future<String> createTest({
-    required String title,
-    required String description,
-    required String createdBy,
-    required List<String> questions,
-    required String answerType, // 'scale' | 'text'
-    String? expertName,
-  });
-
-
-  Future<void> deleteTest(String testId);
-
-  // ÇÖZÜLEN TESTLER
+  // Eski kodları kırmamak için opsiyonel legacy fonksiyon
+  @Deprecated('Use submitSolvedTestWithAnalysis')
   Future<void> submitSolvedTest({
     required String userId,
     required String testId,
     required String testTitle,
-    required List<Map<String, dynamic>> questions,
-    required List<Map<String, dynamic>> answers,
+    required List<dynamic> questions,
+    required List<dynamic> answers,
   });
-
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchSolvedTestsByUser(
-      String userId,
-      );
 }

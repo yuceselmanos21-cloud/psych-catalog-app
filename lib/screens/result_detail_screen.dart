@@ -2,13 +2,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 class ResultDetailScreen extends StatelessWidget {
-  // Eğer çözülen testler listesinden geliyorsak arguments kullanıyoruz
   final bool fromArguments;
 
-  // Eğer SolveTestScreen içinden direkt geliyorsak, burada dolu geliyor
   final String? testTitle;
-  final List<String>? answers;
-  final List<String>? questions;
+  final List<dynamic>? answers;
+  final List<dynamic>? questions;
   final DateTime? solvedAt;
   final String? aiAnalysis;
 
@@ -22,12 +20,27 @@ class ResultDetailScreen extends StatelessWidget {
     this.aiAnalysis,
   });
 
+  static String _formatDateTime(DateTime dt) {
+    final d = dt.day.toString().padLeft(2, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final y = dt.year.toString();
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return '$d.$m.$y $hh:$mm';
+  }
+
+  List<String> _normalizeList(dynamic raw) {
+    if (raw is List) {
+      return raw.map((e) => e.toString()).toList();
+    }
+    return <String>[];
+  }
+
   @override
   Widget build(BuildContext context) {
-    // 1) Eğer fromArguments true ise, Navigator.pushNamed ile gelen argümanları al
     String title = testTitle ?? 'Test Sonucu';
-    List<String> localAnswers = answers ?? [];
-    List<String> localQuestions = questions ?? [];
+    List<String> localAnswers = _normalizeList(answers);
+    List<String> localQuestions = _normalizeList(questions);
     DateTime? localSolvedAt = solvedAt;
     String localAnalysis = aiAnalysis ?? '';
 
@@ -43,18 +56,20 @@ class ResultDetailScreen extends StatelessWidget {
 
       title = args['testTitle']?.toString() ?? 'Test Sonucu';
 
-      final answersRaw = List<dynamic>.from(args['answers'] ?? <dynamic>[]);
-      final questionsRaw =
-      List<dynamic>.from(args['questions'] ?? <dynamic>[]);
+      localAnswers = _normalizeList(args['answers']);
+      localQuestions = _normalizeList(args['questions']);
 
-      localAnswers = answersRaw.map((e) => e.toString()).toList();
-      localQuestions = questionsRaw.map((e) => e.toString()).toList();
-
-      final Timestamp? ts = args['createdAt'] as Timestamp?;
-      localSolvedAt = ts?.toDate();
+      final dynamic rawCreated = args['createdAt'];
+      if (rawCreated is Timestamp) {
+        localSolvedAt = rawCreated.toDate();
+      } else if (rawCreated is DateTime) {
+        localSolvedAt = rawCreated;
+      }
 
       localAnalysis = args['aiAnalysis']?.toString() ?? '';
     }
+
+    final itemCount = localAnswers.length;
 
     return Scaffold(
       appBar: AppBar(
@@ -65,7 +80,6 @@ class ResultDetailScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Başlık
             Text(
               title,
               style: const TextStyle(
@@ -77,14 +91,13 @@ class ResultDetailScreen extends StatelessWidget {
 
             if (localSolvedAt != null)
               Text(
-                'Çözülme tarihi: $localSolvedAt',
+                'Çözülme tarihi: ${_formatDateTime(localSolvedAt!)}',
                 style: const TextStyle(color: Colors.grey),
               ),
 
             const SizedBox(height: 16),
 
-            // AI ANALİZİ
-            if (localAnalysis.isNotEmpty)
+            if (localAnalysis.trim().isNotEmpty)
               Card(
                 color: Colors.purple.shade50,
                 child: Padding(
@@ -100,10 +113,7 @@ class ResultDetailScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        localAnalysis,
-                        style: const TextStyle(fontSize: 14),
-                      ),
+                      Text(localAnalysis),
                     ],
                   ),
                 ),
@@ -127,41 +137,41 @@ class ResultDetailScreen extends StatelessWidget {
             ),
             const SizedBox(height: 12),
 
-            // SORU + CEVAP LİSTESİ
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: localAnswers.length,
-              itemBuilder: (context, index) {
-                final soru = index < localQuestions.length
-                    ? localQuestions[index]
-                    : 'Soru ${index + 1}';
-                final cevap = localAnswers[index];
+            if (itemCount == 0)
+              const Text(
+                'Bu test sonucu için cevap bulunamadı.',
+                style: TextStyle(color: Colors.grey),
+              )
+            else
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: itemCount,
+                itemBuilder: (context, index) {
+                  final soru = index < localQuestions.length
+                      ? localQuestions[index]
+                      : 'Soru ${index + 1}';
+                  final cevap = localAnswers[index];
 
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Soru
-                        Text(
-                          'Soru ${index + 1}: $soru',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Soru ${index + 1}: $soru',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
-                        ),
-                        const SizedBox(height: 6),
-
-                        // Cevap
-                        Text('Cevabın: $cevap'),
-                      ],
+                          const SizedBox(height: 6),
+                          Text('Cevabın: $cevap'),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              },
-            ),
+                  );
+                },
+              ),
           ],
         ),
       ),

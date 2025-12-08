@@ -1,11 +1,12 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../repositories/firestore_test_repository.dart';
-import 'analysis_service.dart'; // AI yorum için
+import 'analysis_service.dart';
 
 class SolveTestScreen extends StatefulWidget {
-  final Map<String, dynamic> testData; // test bilgisi buradan geliyor
+  final Map<String, dynamic> testData;
 
   const SolveTestScreen({super.key, required this.testData});
 
@@ -17,12 +18,9 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
   final _testRepo = FirestoreTestRepository();
 
   late final List<String> _questions;
-  late final String _answerMode; // 'scale' veya 'text'
+  late final String _answerMode; // 'scale' | 'text'
 
-  // scale modu için: 1–5
   late final List<int?> _scaleAnswers;
-
-  // text modu için
   late final List<TextEditingController> _textControllers;
 
   bool _saving = false;
@@ -33,7 +31,6 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
     super.initState();
 
     final rawQuestions = widget.testData['questions'];
-
     _questions = _normalizeQuestions(rawQuestions);
 
     _answerMode = _detectAnswerMode(widget.testData);
@@ -79,8 +76,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
     return <String>[];
   }
 
-  /// Test belgesinden cevap modunu tespit etmeye çalışır.
-  /// Daha önce ne isim verdiğimizi bilmediğimiz için ESNEK davranıyor.
+  /// ESNEK cevap modu tespiti
   String _detectAnswerMode(Map<String, dynamic> data) {
     final dynamic raw = data['answerMode'] ??
         data['answer_mode'] ??
@@ -101,7 +97,13 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
     return 'text';
   }
 
+  bool get _hasQuestions => _questions.isNotEmpty;
+
   Future<void> _submit() async {
+    if (_saving) return;
+
+    FocusScope.of(context).unfocus();
+
     setState(() {
       _saving = true;
       _error = null;
@@ -124,6 +126,14 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
         if (!mounted) return;
         setState(() {
           _error = 'Test kimliği eksik görünüyor.';
+        });
+        return;
+      }
+
+      if (_questions.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _error = 'Bu testte soru bulunamadı.';
         });
         return;
       }
@@ -151,7 +161,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
         answers = _textControllers.map((c) => c.text.trim()).toList();
       }
 
-      // 2) AI için prompt hazırla
+      // 2) AI prompt
       final buffer = StringBuffer();
       buffer.writeln(
           'Sen klinik psikoloji odaklı, teşhis koymadan destekleyici analiz yapan bir yardımcı yapay zekâsın.');
@@ -172,7 +182,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
 
       final prompt = buffer.toString();
 
-      // 3) AI analizi al
+      // 3) AI analizi
       String aiText = '';
       try {
         aiText = await AnalysisService.generateAnalysis(prompt);
@@ -180,7 +190,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
         aiText = 'Yapay zekâ analizi alınırken bir hata oluştu: $e';
       }
 
-      // 4) Repo üzerinden kaydet (solvedTests)
+      // 4) Repo ile kaydet
       await _testRepo.submitSolvedTestWithAnalysis(
         userId: user.uid,
         testId: testId,
@@ -191,7 +201,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
         aiAnalysis: aiText,
       );
 
-      // 5) Anlık sonuç ekranına yönlendir
+      // 5) Sonuç ekranı
       if (!mounted) return;
 
       Navigator.pushReplacementNamed(
@@ -202,7 +212,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
           'questions': _questions,
           'answers': answers,
           'aiAnalysis': aiText,
-          'createdAt': Timestamp.now(), // ekrandaki gösterim için
+          'createdAt': Timestamp.now(),
         },
       );
     } catch (e) {
@@ -263,37 +273,37 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
           ),
         ),
       );
-    } else {
-      return Card(
-        margin: const EdgeInsets.only(bottom: 12),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Soru ${index + 1}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(soru),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _textControllers[index],
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Cevabın',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
     }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Soru ${index + 1}',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(soru),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _textControllers[index],
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Cevabın',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -308,23 +318,26 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            if (_answerMode == 'scale')
-              const Align(
-                alignment: Alignment.centerLeft,
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _answerMode == 'scale'
+                    ? 'Bu testte cevaplar 1–5 arası sayısal olarak verilir.'
+                    : 'Bu testte cevaplarını serbest metin olarak yazmalısın.',
+                style: const TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            if (!_hasQuestions)
+              const Padding(
+                padding: EdgeInsets.only(top: 24),
                 child: Text(
-                  'Bu testte cevaplar 1–5 arası sayısal olarak verilir.',
-                  style: TextStyle(fontSize: 13, color: Colors.grey),
-                ),
-              )
-            else
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Bu testte cevaplarını serbest metin olarak yazmalısın.',
-                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                  'Bu testte gösterilecek soru bulunamadı.',
+                  style: TextStyle(color: Colors.grey),
                 ),
               ),
-            const SizedBox(height: 12),
+
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -333,17 +346,23 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
                   style: const TextStyle(color: Colors.red),
                 ),
               ),
+
             Expanded(
-              child: ListView.builder(
+              child: !_hasQuestions
+                  ? const SizedBox.shrink()
+                  : ListView.builder(
                 itemCount: _questions.length,
-                itemBuilder: (context, index) => _buildQuestionItem(index),
+                itemBuilder: (context, index) =>
+                    _buildQuestionItem(index),
               ),
             ),
+
             const SizedBox(height: 8),
+
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: _saving ? null : _submit,
+                onPressed: (_saving || !_hasQuestions) ? null : _submit,
                 icon: _saving
                     ? const SizedBox(
                   width: 16,

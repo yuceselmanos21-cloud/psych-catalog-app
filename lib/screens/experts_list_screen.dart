@@ -1,8 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import 'expert_public_profile_screen.dart';
-
 class ExpertsListScreen extends StatefulWidget {
   const ExpertsListScreen({super.key});
 
@@ -25,7 +23,6 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
       ),
       body: Column(
         children: [
-          // 🔍 ARAMA KUTUSU
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
@@ -41,8 +38,6 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
               },
             ),
           ),
-
-          // 🔁 UZMAN LİSTESİ
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: expertsQuery.snapshots(),
@@ -52,14 +47,11 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
                 }
 
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(
-                    child: Text('Henüz uzman kaydı yok.'),
-                  );
+                  return const Center(child: Text('Henüz uzman kaydı yok.'));
                 }
 
                 final allDocs = snapshot.data!.docs;
 
-                // 🔎 İSİM / ŞEHİR / MESLEK / UZMANLIK ARAMA
                 final filtered = allDocs.where((doc) {
                   final data =
                       doc.data() as Map<String, dynamic>? ?? <String, dynamic>{};
@@ -92,54 +84,40 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
                         doc.data() as Map<String, dynamic>? ?? <String, dynamic>{};
 
                     final expertId = doc.id;
-                    final name =
-                        data['name']?.toString() ?? 'Uzman';
-                    final city =
-                        data['city']?.toString() ?? 'Belirtilmemiş';
-                    final profession =
-                        data['profession']?.toString() ?? 'Meslek belirtilmemiş';
-                    final specialties =
-                        data['specialties']?.toString() ?? '';
+                    final name = data['name']?.toString() ?? 'Uzman';
+                    final city = data['city']?.toString() ?? 'Belirtilmemiş';
+                    final profession = data['profession']?.toString() ??
+                        'Meslek belirtilmemiş';
+                    final specialties = data['specialties']?.toString() ?? '';
                     final photoUrl = data['photoUrl']?.toString();
 
                     return Card(
-                      margin:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundImage: (photoUrl != null &&
-                              photoUrl.isNotEmpty)
+                          backgroundImage:
+                          (photoUrl != null && photoUrl.isNotEmpty)
                               ? NetworkImage(photoUrl)
                               : null,
                           child: (photoUrl == null || photoUrl.isEmpty)
-                              ? Text(
-                            name.isNotEmpty
-                                ? name[0].toUpperCase()
-                                : '?',
-                          )
+                              ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?')
                               : null,
                         ),
                         title: Text(name),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              profession,
-                              style: const TextStyle(fontSize: 12),
-                            ),
+                            Text(profession, style: const TextStyle(fontSize: 12)),
                             const SizedBox(height: 2),
                             Row(
                               children: [
-                                const Icon(
-                                  Icons.location_on,
-                                  size: 14,
-                                  color: Colors.grey,
-                                ),
+                                const Icon(Icons.location_on,
+                                    size: 14, color: Colors.grey),
                                 const SizedBox(width: 4),
-                                Text(
-                                  city,
-                                  style: const TextStyle(fontSize: 12),
-                                ),
+                                Text(city, style: const TextStyle(fontSize: 12)),
                               ],
                             ),
                             if (specialties.isNotEmpty)
@@ -158,14 +136,10 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
                           ],
                         ),
                         onTap: () {
-                          // 👇 UZMAN PROFİL SAYFASI
-                          Navigator.push(
+                          Navigator.pushNamed(
                             context,
-                            MaterialPageRoute(
-                              builder: (_) => ExpertPublicProfileScreen(
-                                expertId: expertId,
-                              ),
-                            ),
+                            '/publicExpertProfile',
+                            arguments: expertId,
                           );
                         },
                       ),

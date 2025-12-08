@@ -5,17 +5,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 
 // Screens
-import 'screens/login_screen.dart';
-import 'screens/register_screen.dart';
-import 'screens/signup_screen.dart';
+import 'screens/auth_screen.dart';
 import 'screens/feed_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/experts_list_screen.dart';
 import 'screens/expert_public_profile_screen.dart';
 
 import 'screens/tests_list_screen.dart';
+import 'screens/tests_screen.dart';
 import 'screens/solve_test_screen.dart';
 import 'screens/solved_tests_screen.dart';
+import 'screens/result_detail_screen.dart';
 
 import 'screens/create_test_screen.dart';
 import 'screens/expert_test_list_screen.dart';
@@ -45,30 +45,46 @@ class PsychCatalogApp extends StatelessWidget {
         useMaterial3: true,
         colorSchemeSeed: Colors.deepPurple,
       ),
+
+      // güvenli varsayılan
       initialRoute: '/login',
 
-      // Arg gerektirmeyen ekranlar
       routes: {
-        '/login': (_) => LoginScreen(),
-        '/register': (_) => RegisterScreen(),
-        '/signup': (_) => SignupScreen(),
-        '/feed': (_) => FeedScreen(),
-        '/profile': (_) => ProfileScreen(),
-        '/experts': (_) => ExpertsListScreen(),
-        '/tests': (_) => TestsListScreen(),
-        '/solvedTests': (_) => SolvedTestsScreen(),
-        '/analysis': (_) => AnalysisScreen(),
-        '/createTest': (_) => CreateTestScreen(),
-        '/expertTests': (_) => ExpertTestListScreen(),
-        '/createPost': (_) => PostCreateScreen(),
+        // Auth (tek kaynak)
+        '/auth': (_) => const AuthScreen(),
+        '/login': (_) => const AuthScreen(initialTab: AuthInitialTab.login),
+        '/signup': (_) => const AuthScreen(initialTab: AuthInitialTab.signup),
+
+        // core
+        '/feed': (_) => const FeedScreen(),
+        '/profile': (_) => const ProfileScreen(),
+        '/experts': (_) => const ExpertsListScreen(),
+
+        // tests
+        '/tests': (_) => const TestsListScreen(),
+        '/allTests': (_) => const TestsScreen(),
+        '/solvedTests': (_) => const SolvedTestsScreen(),
+        '/analysis': (_) => const AnalysisScreen(),
+
+        // expert test flows
+        '/createTest': (_) => const CreateTestScreen(),
+        '/expertTests': (_) => const ExpertTestListScreen(),
+
+        // posts
+        '/createPost': (_) => const PostCreateScreen(),
       },
 
-      // Arg gerektiren ekranlar
       onGenerateRoute: (settings) {
         final name = settings.name;
         final args = settings.arguments;
 
-        // ---------------------- POST DETAIL ----------------------
+        if (name == '/resultDetail') {
+          return MaterialPageRoute(
+            builder: (_) => const ResultDetailScreen(),
+            settings: settings,
+          );
+        }
+
         if (name == '/postDetail') {
           final postId = _extractId(args, mapKey: 'postId');
           if (postId == null || postId.isEmpty) {
@@ -81,7 +97,6 @@ class PsychCatalogApp extends StatelessWidget {
           );
         }
 
-        // ---------------------- PUBLIC EXPERT PROFILE ----------------------
         if (name == '/publicExpertProfile') {
           final expertId = _extractId(args, mapKey: 'expertId');
           if (expertId == null || expertId.isEmpty) {
@@ -94,7 +109,6 @@ class PsychCatalogApp extends StatelessWidget {
           );
         }
 
-        // ---------------------- EXPERT TEST DETAIL ----------------------
         if (name == '/expertTestDetail') {
           final testId = _extractId(args, mapKey: 'testId');
           if (testId == null || testId.isEmpty) {
@@ -107,7 +121,6 @@ class PsychCatalogApp extends StatelessWidget {
           );
         }
 
-        // ---------------------- SOLVE TEST ----------------------
         if (name == '/solveTest') {
           if (args is Map<String, dynamic>) {
             return MaterialPageRoute(
@@ -123,7 +136,6 @@ class PsychCatalogApp extends StatelessWidget {
     );
   }
 
-  // Tek bir yerden güvenli id çıkarma
   static String? _extractId(Object? args, {String? mapKey}) {
     if (args == null) return null;
 
@@ -136,8 +148,10 @@ class PsychCatalogApp extends StatelessWidget {
       if (mapKey != null && args[mapKey] is String) {
         return args[mapKey] as String;
       }
-      // bazen direkt {'id': '...'} gibi gelebilir
       if (args['id'] is String) return args['id'] as String;
+      if (args['postId'] is String) return args['postId'] as String;
+      if (args['expertId'] is String) return args['expertId'] as String;
+      if (args['testId'] is String) return args['testId'] as String;
     }
 
     return null;

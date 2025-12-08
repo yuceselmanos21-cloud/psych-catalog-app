@@ -32,7 +32,6 @@ class ExpertTestListScreen extends StatelessWidget {
         title: const Text('Oluşturduğum Testler'),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        // ✅ Firestore çağrısı ekrandan kalktı
         stream: testRepo.watchTestsByCreator(user.uid),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -49,7 +48,6 @@ class ExpertTestListScreen extends StatelessWidget {
             return const Center(child: Text('Henüz test oluşturmadın.'));
           }
 
-          // ✅ Güvenli sıralama (repo zaten orderBy yapıyorsa da sorun değil)
           final docs = snapshot.data!.docs.toList();
           docs.sort((a, b) {
             final aTs = a.data()['createdAt'] as Timestamp?;
@@ -102,7 +100,7 @@ class ExpertTestListScreen extends StatelessWidget {
                     Navigator.pushNamed(
                       context,
                       '/expertTestDetail',
-                      arguments: doc.id, // ✅ eski davranış korunuyor
+                      arguments: doc.id,
                     );
                   },
                 ),

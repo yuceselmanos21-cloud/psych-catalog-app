@@ -53,13 +53,20 @@ class ExpertTestDetailScreen extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
 
+          if (snapshot.hasError) {
+            return const Center(child: Text('Test yüklenirken hata oluştu.'));
+          }
+
           if (!snapshot.hasData || !snapshot.data!.exists) {
             return const Center(child: Text('Test bulunamadı.'));
           }
 
           final data = snapshot.data!.data() ?? <String, dynamic>{};
 
-          final title = data['title']?.toString() ?? 'Başlıksız test';
+          final title = data['title']?.toString().trim().isNotEmpty == true
+              ? data['title'].toString()
+              : 'Başlıksız test';
+
           final description = data['description']?.toString() ?? '';
           final answerType = data['answerType']?.toString() ?? 'text';
           final questions = _normalizeQuestions(data['questions']);
@@ -80,7 +87,7 @@ class ExpertTestDetailScreen extends StatelessWidget {
 
                   const SizedBox(height: 8),
 
-                  if (description.isNotEmpty) ...[
+                  if (description.trim().isNotEmpty) ...[
                     Text(description),
                     const SizedBox(height: 12),
                   ],
@@ -96,7 +103,7 @@ class ExpertTestDetailScreen extends StatelessWidget {
                   const SizedBox(height: 16),
 
                   const Text(
-                    'Sorular:',
+                    'Sorular',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -124,11 +131,21 @@ class ExpertTestDetailScreen extends StatelessWidget {
                   StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                     stream: testRepo.watchSolvedTestsByTest(testId),
                     builder: (context, snap) {
-                      if (!snap.hasData) {
-                        return const SizedBox.shrink();
+                      if (snap.connectionState == ConnectionState.waiting) {
+                        return const Text(
+                          'Çözülme sayısı yükleniyor...',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        );
                       }
 
-                      final count = snap.data!.docs.length;
+                      if (snap.hasError) {
+                        return const Text(
+                          'Çözülme sayısı alınamadı.',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        );
+                      }
+
+                      final count = snap.data?.docs.length ?? 0;
 
                       return Text(
                         'Bu test $count kez çözülmüş.',

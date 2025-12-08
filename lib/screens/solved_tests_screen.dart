@@ -7,7 +7,7 @@ import '../repositories/firestore_test_repository.dart';
 class SolvedTestsScreen extends StatelessWidget {
   const SolvedTestsScreen({super.key});
 
-  String _formatDateTime(DateTime dt) {
+  static String _formatDateTime(DateTime dt) {
     return '${dt.day.toString().padLeft(2, '0')}.'
         '${dt.month.toString().padLeft(2, '0')}.'
         '${dt.year} ${dt.hour.toString().padLeft(2, '0')}:'
@@ -30,7 +30,6 @@ class SolvedTestsScreen extends StatelessWidget {
         title: const Text('Çözdüğüm Testler'),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        // ✅ Firestore çağrısı ekrandan kalktı
         stream: testRepo.watchSolvedTestsByUser(user.uid),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -43,13 +42,14 @@ class SolvedTestsScreen extends StatelessWidget {
             );
           }
 
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          final data = snapshot.data;
+          if (data == null || data.docs.isEmpty) {
             return const Center(child: Text('Henüz çözülmüş test yok.'));
           }
 
-          final docs = snapshot.data!.docs.toList();
-
-          // ✅ Ekstra güvenlik: createdAt eksikse bile sıralama bozulmasın
+          // Repo tarafı sıralıyor olsa da, createdAt eksik durumlarına karşı
+          // extra güvenlik için client-side sıralama bırakıyoruz.
+          final docs = data.docs.toList();
           docs.sort((a, b) {
             final aTs = a.data()['createdAt'] as Timestamp?;
             final bTs = b.data()['createdAt'] as Timestamp?;
@@ -64,20 +64,24 @@ class SolvedTestsScreen extends StatelessWidget {
             itemCount: docs.length,
             itemBuilder: (context, index) {
               final doc = docs[index];
-              final data = doc.data();
+              final d = doc.data();
 
-              final title = data['testTitle']?.toString() ?? 'Test';
-              final ts = data['createdAt'] as Timestamp?;
+              final title = d['testTitle']?.toString().trim();
+              final safeTitle = (title == null || title.isEmpty)
+                  ? 'Test'
+                  : title;
+
+              final ts = d['createdAt'] as Timestamp?;
               final solvedAt = ts?.toDate();
 
-              final aiText = data['aiAnalysis']?.toString() ?? '';
+              final aiText = d['aiAnalysis']?.toString() ?? '';
               final hasAi = aiText.trim().isNotEmpty;
 
               return Card(
                 margin:
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 child: ListTile(
-                  title: Text(title),
+                  title: Text(safeTitle),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -89,6 +93,7 @@ class SolvedTestsScreen extends StatelessWidget {
                             color: Colors.grey,
                           ),
                         ),
+                      const SizedBox(height: 2),
                       Text(
                         hasAi ? 'AI yorumu kayıtlı' : 'AI yorumu bulunmuyor',
                         style: TextStyle(
@@ -104,11 +109,11 @@ class SolvedTestsScreen extends StatelessWidget {
                       context,
                       '/resultDetail',
                       arguments: {
-                        'testTitle': title,
+                        'testTitle': safeTitle,
                         'answers':
-                        List<dynamic>.from(data['answers'] ?? const []),
+                        List<dynamic>.from(d['answers'] ?? const []),
                         'questions':
-                        List<dynamic>.from(data['questions'] ?? const []),
+                        List<dynamic>.from(d['questions'] ?? const []),
                         'createdAt': ts,
                         'aiAnalysis': aiText,
                       },
