@@ -26,6 +26,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   String _currentUserName = 'Kullanıcı';
   String _currentUserRole = 'client';
 
+  final Set<String> _expandedReplyIds = {};
+
   User? get _currentUser => FirebaseAuth.instance.currentUser;
 
   @override
@@ -51,9 +53,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         _currentUserName = (data?['name'] ?? 'Kullanıcı').toString();
         _currentUserRole = (data?['role'] ?? 'client').toString();
       });
-    } catch (_) {
-      // sessiz geç
-    }
+    } catch (_) {}
   }
 
   @override
@@ -65,6 +65,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   int _asInt(dynamic value) {
     if (value is int) return value;
     if (value is double) return value.toInt();
+    if (value is num) return value.toInt();
     if (value is String) return int.tryParse(value) ?? 0;
     return 0;
   }
@@ -92,8 +93,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         authorId: user.uid,
         authorName: _currentUserName,
       );
-
       _replyCtrl.clear();
+      FocusScope.of(context).unfocus();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -233,7 +234,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     );
   }
 
-  // ---------- SAHTE MEDYA (DETAIL İÇİN DE TUTARLI) ----------
+  // ---------- SAHTE MEDYA ----------
   Widget _buildFakeImageBox() {
     return Container(
       height: 180,
@@ -268,13 +269,436 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         borderRadius: BorderRadius.circular(12),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: const [
+      child: const Row(
+        children: [
           Icon(Icons.graphic_eq, color: Colors.deepPurple),
           SizedBox(width: 8),
           Text('Ses kaydı (örnek alan)'),
           Spacer(),
           Icon(Icons.play_arrow),
+        ],
+      ),
+    );
+  }
+
+  // ---------- REPLY -> REPLY DIALOG ----------
+  Future<void> _showReplyToReplyDialog(String parentReplyId) async {
+    final ctrl = TextEditingController();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Yoruma Yanıt'),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: 'Yanıtını yaz...',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('İptal'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Gönder'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    final user = _currentUser;
+    if (user == null) return;
+
+    final text = ctrl.text.trim();
+    if (text.isEmpty) return;
+
+    try {
+      await _postRepo.addChildReply(
+        postId: widget.postId,
+        parentReplyId: parentReplyId,
+        text: text,
+        authorId: user.uid,
+        authorName: _currentUserName,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _expandedReplyIds.add(parentReplyId);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Yanıt eklenemedi: $e')),
+      );
+    }
+  }
+
+  // ---------- REPLY TILE ----------
+  Widget _buildReplyCard(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data();
+
+    final replyId = doc.id;
+    final text = data['text']?.toString() ?? '';
+    final authorName = data['authorName']?.toString() ?? 'Kullanıcı';
+    final authorId = data['authorId']?.toString();
+
+    final ts = data['createdAt'] as Timestamp?;
+    final createdAt = ts?.toDate();
+
+    final likeCount = _asInt(data['likeCount']);
+    final dislikeCount = _asInt(data['dislikeCount']);
+    final childCount = _asInt(data['replyCount']);
+
+    final likedByRaw = data['likedBy'];
+    final dislikedByRaw = data['dislikedBy'];
+
+    final likedBy = likedByRaw is List
+        ? likedByRaw.map((e) => e.toString()).toList()
+        : <String>[];
+
+    final dislikedBy = dislikedByRaw is List
+        ? dislikedByRaw.map((e) => e.toString()).toList()
+        : <String>[];
+
+    final currentUserId = _currentUser?.uid;
+    final isLiked = currentUserId != null && likedBy.contains(currentUserId);
+    final isDisliked =
+        currentUserId != null && dislikedBy.contains(currentUserId);
+
+    final expanded = _expandedReplyIds.contains(replyId);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // header
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  child: Text(
+                    authorName.isNotEmpty ? authorName[0].toUpperCase() : '?',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    authorName,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                if (createdAt != null)
+                  Text(
+                    _formatDateTime(createdAt),
+                    style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            if (text.isNotEmpty) Text(text),
+
+            const SizedBox(height: 8),
+
+            // actions
+            Row(
+              children: [
+                TextButton.icon(
+                  onPressed: () => _showReplyToReplyDialog(replyId),
+                  icon: const Icon(Icons.reply, size: 16),
+                  label: const Text(
+                    'Yanıtla',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+                const SizedBox(width: 6),
+
+                InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: currentUserId == null
+                      ? null
+                      : () => _postRepo.toggleReplyLike(
+                    postId: widget.postId,
+                    replyId: replyId,
+                    userId: currentUserId,
+                  ),
+                  child: Padding(
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.thumb_up_alt_outlined,
+                          size: 16,
+                          color: isLiked ? Colors.green : Colors.grey[700],
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          likeCount.toString(),
+                          style:
+                          const TextStyle(fontSize: 11, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 10),
+
+                InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: currentUserId == null
+                      ? null
+                      : () => _postRepo.toggleReplyDislike(
+                    postId: widget.postId,
+                    replyId: replyId,
+                    userId: currentUserId,
+                  ),
+                  child: Padding(
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.thumb_down_alt_outlined,
+                          size: 16,
+                          color: isDisliked ? Colors.red : Colors.grey[700],
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          dislikeCount.toString(),
+                          style:
+                          const TextStyle(fontSize: 11, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const Spacer(),
+
+                if (childCount > 0)
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        if (expanded) {
+                          _expandedReplyIds.remove(replyId);
+                        } else {
+                          _expandedReplyIds.add(replyId);
+                        }
+                      });
+                    },
+                    child: Text(
+                      expanded
+                          ? 'Yanıtları gizle'
+                          : 'Yanıtları gör ($childCount)',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+              ],
+            ),
+
+            if (expanded) ...[
+              const SizedBox(height: 6),
+              _buildChildReplies(replyId),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChildReplies(String parentReplyId) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _postRepo.watchChildReplies(
+        widget.postId,
+        parentReplyId,
+      ),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 6),
+            child: LinearProgressIndicator(minHeight: 2),
+          );
+        }
+
+        final docs = snap.data?.docs ?? [];
+        if (docs.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.only(left: 12, bottom: 6),
+            child: Text(
+              'Henüz yanıt yok.',
+              style: TextStyle(fontSize: 11, color: Colors.grey),
+            ),
+          );
+        }
+
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: docs.length,
+          itemBuilder: (context, i) => _buildChildReplyTile(
+            parentReplyId,
+            docs[i],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildChildReplyTile(
+      String parentReplyId,
+      QueryDocumentSnapshot<Map<String, dynamic>> doc,
+      ) {
+    final data = doc.data();
+
+    final text = data['text']?.toString() ?? '';
+    final authorName = data['authorName']?.toString() ?? 'Kullanıcı';
+
+    final ts = data['createdAt'] as Timestamp?;
+    final createdAt = ts?.toDate();
+
+    final likeCount = _asInt(data['likeCount']);
+    final dislikeCount = _asInt(data['dislikeCount']);
+
+    final likedByRaw = data['likedBy'];
+    final dislikedByRaw = data['dislikedBy'];
+
+    final likedBy = likedByRaw is List
+        ? likedByRaw.map((e) => e.toString()).toList()
+        : <String>[];
+
+    final dislikedBy = dislikedByRaw is List
+        ? dislikedByRaw.map((e) => e.toString()).toList()
+        : <String>[];
+
+    final currentUserId = _currentUser?.uid;
+    final isLiked = currentUserId != null && likedBy.contains(currentUserId);
+    final isDisliked =
+        currentUserId != null && dislikedBy.contains(currentUserId);
+
+    return Container(
+      margin: const EdgeInsets.only(left: 18, bottom: 6),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 12,
+                child: Text(
+                  authorName.isNotEmpty ? authorName[0].toUpperCase() : '?',
+                  style: const TextStyle(fontSize: 10),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  authorName,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (createdAt != null)
+                Text(
+                  _formatDateTime(createdAt),
+                  style: const TextStyle(fontSize: 9, color: Colors.grey),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (text.isNotEmpty)
+            Text(
+              text,
+              style: const TextStyle(fontSize: 12),
+            ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: currentUserId == null
+                    ? null
+                    : () => _postRepo.toggleChildReplyLike(
+                  postId: widget.postId,
+                  parentReplyId: parentReplyId,
+                  replyId: doc.id,
+                  userId: currentUserId,
+                ),
+                child: Padding(
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.thumb_up_alt_outlined,
+                        size: 14,
+                        color: isLiked ? Colors.green : Colors.grey[700],
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        likeCount.toString(),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: currentUserId == null
+                    ? null
+                    : () => _postRepo.toggleChildReplyDislike(
+                  postId: widget.postId,
+                  parentReplyId: parentReplyId,
+                  replyId: doc.id,
+                  userId: currentUserId,
+                ),
+                child: Padding(
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.thumb_down_alt_outlined,
+                        size: 14,
+                        color: isDisliked ? Colors.red : Colors.grey[700],
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        dislikeCount.toString(),
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -389,7 +813,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                       onSelected: (value) {
                                         if (value == 'edit') {
                                           _showEditPostDialog(
-                                              widget.postId, text);
+                                            widget.postId,
+                                            text,
+                                          );
                                         } else if (value == 'delete') {
                                           _confirmDeletePost(widget.postId);
                                         }
@@ -417,7 +843,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
                               if (text.isNotEmpty) const SizedBox(height: 12),
 
-                              // ✅ Post tipine göre fake medya alanı
                               if (postType == 'image') _buildFakeImageBox(),
                               if (postType == 'video') _buildFakeVideoBox(),
                               if (postType == 'audio') _buildFakeAudioBox(),
@@ -474,12 +899,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 MainAxisAlignment.spaceBetween,
                                 children: [
                                   IconButton(
-                                    icon:
-                                    const Icon(Icons.mode_comment_outlined),
-                                    onPressed: () {
-                                      // Basit tutuyoruz.
-                                      // İleride scroll-to-reply eklenebilir.
-                                    },
+                                    icon: const Icon(Icons.mode_comment_outlined),
+                                    onPressed: () {},
                                   ),
                                   IconButton(
                                     icon: _reposting
@@ -523,7 +944,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       const SizedBox(height: 16),
 
                       const Text(
-                        'Yanıtlar',
+                        'Yorumlar',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
@@ -531,7 +952,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       ),
                       const SizedBox(height: 8),
 
-                      // -------- Yanıtlar --------
+                      // -------- Top-level Replies --------
                       StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                         stream: _postRepo.watchReplies(widget.postId),
                         builder: (context, replySnap) {
@@ -550,7 +971,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             return const Padding(
                               padding: EdgeInsets.symmetric(vertical: 8),
                               child: Text(
-                                'Henüz yanıt yok. İlk yorumu sen yaz.',
+                                'Henüz yorum yok. İlk yorumu sen yaz.',
                                 style: TextStyle(color: Colors.grey),
                               ),
                             );
@@ -563,40 +984,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: replies.length,
                             itemBuilder: (context, index) {
-                              final rData =
-                                  replies[index].data() ?? <String, dynamic>{};
-                              final rText = rData['text']?.toString() ?? '';
-                              final rAuthor =
-                                  rData['authorName']?.toString() ??
-                                      'Kullanıcı';
-                              final rTs = rData['createdAt'] as Timestamp?;
-                              final rDate = rTs?.toDate();
-
-                              return ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                leading: CircleAvatar(
-                                  child: Text(
-                                    rAuthor.isNotEmpty
-                                        ? rAuthor[0].toUpperCase()
-                                        : '?',
-                                  ),
-                                ),
-                                title: Text(rAuthor),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(rText),
-                                    if (rDate != null)
-                                      Text(
-                                        _formatDateTime(rDate),
-                                        style: const TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.grey,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              );
+                              return _buildReplyCard(replies[index]);
                             },
                           );
                         },
@@ -625,7 +1013,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           minLines: 1,
                           maxLines: 3,
                           decoration: const InputDecoration(
-                            hintText: 'Yanıt yaz...',
+                            hintText: 'Yorum yaz...',
                             border: OutlineInputBorder(),
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(

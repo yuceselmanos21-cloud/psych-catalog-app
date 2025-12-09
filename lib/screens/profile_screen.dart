@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../repositories/firestore_follow_repository.dart';
 import '../repositories/firestore_post_repository.dart';
 import '../repositories/firestore_test_repository.dart';
 import '../repositories/firestore_user_repository.dart';
@@ -25,11 +26,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _specialtiesCtrl = TextEditingController();
   final _aboutCtrl = TextEditingController();
 
-  final _postRepo = FirestorePostRepository();
-  final _testRepo = FirestoreTestRepository();
-  final _userRepo = FirestoreUserRepository();
+  final FirestorePostRepository _postRepo = FirestorePostRepository();
+  final FirestoreTestRepository _testRepo = FirestoreTestRepository();
+  final FirestoreUserRepository _userRepo = FirestoreUserRepository();
+  final FirestoreFollowRepository _followRepo = FirestoreFollowRepository();
 
-  final List<String> _professionOptions = [
+  final List<String> _professionOptions = const [
     'Psikolog',
     'Klinik Psikolog',
     'Nöropsikolog',
@@ -145,22 +147,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         }
 
-        if (!snap.hasData || snap.data!.docs.isEmpty) {
+        final docs = snap.data?.docs.toList() ?? [];
+        if (docs.isEmpty) {
           return const Text(
             'Henüz oluşturduğun test yok.',
             style: TextStyle(color: Colors.grey),
           );
         }
 
-        final docs = snap.data!.docs.toList();
-
         docs.sort((a, b) {
           final aTs = a.data()['createdAt'] as Timestamp?;
           final bTs = b.data()['createdAt'] as Timestamp?;
-          final aTime =
-              aTs?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final bTime =
-              bTs?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final aTime = aTs?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bTime = bTs?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
           return bTime.compareTo(aTime);
         });
 
@@ -227,14 +226,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         }
 
-        if (!snap.hasData || snap.data!.docs.isEmpty) {
+        final docs = snap.data?.docs.toList() ?? [];
+        if (docs.isEmpty) {
           return const Text(
             'Henüz çözdüğün test yok.',
             style: TextStyle(color: Colors.grey),
           );
         }
 
-        final docs = snap.data!.docs.toList();
         final limited = docs.take(5).toList();
 
         return ListView.builder(
@@ -264,8 +263,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   '/resultDetail',
                   arguments: {
                     'testTitle': data['testTitle'],
-                    'answers':
-                    List<dynamic>.from(data['answers'] ?? <dynamic>[]),
+                    'answers': List<dynamic>.from(data['answers'] ?? <dynamic>[]),
                     'questions':
                     List<dynamic>.from(data['questions'] ?? <dynamic>[]),
                     'createdAt': data['createdAt'],
@@ -316,21 +314,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
           );
         }
 
-        if (!snap.hasData || snap.data!.docs.isEmpty) {
+        final docs = snap.data?.docs ?? const [];
+        if (docs.isEmpty) {
           return const Text(
             'Henüz paylaşım yapmadın.',
             style: TextStyle(color: Colors.grey),
           );
         }
 
-        final docs = snap.data!.docs;
-
         return ListView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: docs.length,
           itemBuilder: (context, index) {
-            final data = docs[index].data();
+            final doc = docs[index];
+            final data = doc.data();
+
             final text = data['text']?.toString() ?? '';
             final ts = data['createdAt'] as Timestamp?;
             final dt = ts?.toDate();
@@ -342,11 +341,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Navigator.pushNamed(
                     context,
                     '/postDetail',
-                    arguments: docs[index].id,
+                    arguments: doc.id,
                   );
                 },
                 title: Text(
-                  text,
+                  text.isNotEmpty ? text : '(içerik yok)',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -380,7 +379,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     );
 
                     if (confirm == true) {
-                      await _deletePost(docs[index].id);
+                      await _deletePost(doc.id);
                     }
                   },
                 ),
@@ -429,6 +428,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _statMiniStream(String label, Stream<int> stream) {
+    return Expanded(
+      child: StreamBuilder<int>(
+        stream: stream,
+        builder: (context, snap) {
+          final value = snap.data ?? 0;
+          return Container(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  value.toString(),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -500,10 +533,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(fontSize: 14),
-          ),
+          child: Text(value, style: const TextStyle(fontSize: 14)),
         ),
       ],
     );
@@ -520,19 +550,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     final data = _userData ?? <String, dynamic>{};
+
     final name = data['name']?.toString() ?? 'Kullanıcı';
     final role = (data['role'] ?? 'client').toString();
     final isExpert = role == 'expert';
+
     final city = data['city']?.toString() ?? 'Belirtilmemiş';
     final profession = data['profession']?.toString() ?? 'Belirtilmemiş';
     final specialties = data['specialties']?.toString() ?? 'Belirtilmemiş';
     final about =
         data['about']?.toString() ?? 'Henüz kendin hakkında bilgi eklemedin.';
+
     final photoUrl = data['photoUrl']?.toString();
     final cvUrl = data['cvUrl']?.toString();
 
-    final followersCount = _asInt(data['followersCount']);
-    final followingCount = _asInt(data['followingCount']);
+    final followersFallback = _asInt(data['followersCount']);
+    final followingFallback = _asInt(data['followingCount']);
 
     return Scaffold(
       appBar: AppBar(
@@ -603,7 +636,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           const SizedBox(width: 4),
                           Text(city),
                         ],
-                      )
+                      ),
                     ],
                   ),
                 ],
@@ -612,14 +645,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             const SizedBox(height: 16),
 
-            // ✅ MINI FOLLOW STATS
-            Row(
-              children: [
-                _statMini('Takipçi', followersCount),
-                const SizedBox(width: 8),
-                _statMini('Takip', followingCount),
-              ],
-            ),
+            // -------- FOLLOW STATS --------
+            if (_uid != null)
+              Row(
+                children: [
+                  _statMiniStream(
+                    'Takipçi',
+                    _followRepo.watchFollowersCount(_uid!),
+                  ),
+                  const SizedBox(width: 8),
+                  _statMiniStream(
+                    'Takip',
+                    _followRepo.watchFollowingCount(_uid!),
+                  ),
+                ],
+              )
+            else
+              Row(
+                children: [
+                  _statMini('Takipçi', followersFallback),
+                  const SizedBox(width: 8),
+                  _statMini('Takip', followingFallback),
+                ],
+              ),
 
             const SizedBox(height: 16),
 
@@ -632,12 +680,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   children: [
                     const Text(
                       'Genel Bilgiler',
-                      style:
-                      TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     _buildInfoRow('Rol', isExpert ? 'Uzman' : 'Danışan'),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
@@ -650,7 +700,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: _editing && isExpert
+                          child: (_editing && isExpert)
                               ? DropdownButtonFormField<String>(
                             value: _selectedProfession?.isNotEmpty == true
                                 ? _selectedProfession
@@ -669,11 +719,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ),
                             )
                                 .toList(),
-                            onChanged: (val) {
-                              setState(() {
-                                _selectedProfession = val;
-                              });
-                            },
+                            onChanged: (val) =>
+                                setState(() => _selectedProfession = val),
                           )
                               : Text(
                             profession,
@@ -700,9 +747,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const Text(
                         'Uzman Bilgileri',
                         style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold),
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                       const SizedBox(height: 8),
+
+                      // Şehir
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
@@ -723,20 +774,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 isDense: true,
                               ),
                             )
-                                : Text(
-                              city,
-                              style: const TextStyle(fontSize: 14),
-                            ),
+                                : Text(city),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Uzmanlık Alanı',
-                          style: TextStyle(fontWeight: FontWeight.w500),
-                        ),
+
+                      const SizedBox(height: 10),
+
+                      const Text(
+                        'Uzmanlık Alanı',
+                        style: TextStyle(fontWeight: FontWeight.w500),
                       ),
                       const SizedBox(height: 4),
                       _editing
@@ -748,13 +795,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         maxLines: 2,
                       )
                           : Text(specialties),
-                      const SizedBox(height: 8),
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Hakkımda',
-                          style: TextStyle(fontWeight: FontWeight.w500),
-                        ),
+
+                      const SizedBox(height: 10),
+
+                      const Text(
+                        'Hakkımda',
+                        style: TextStyle(fontWeight: FontWeight.w500),
                       ),
                       const SizedBox(height: 4),
                       _editing
@@ -804,13 +850,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 18),
 
             // -------- AKTİVİTELER --------
-            _sectionCard(
-              title: 'Aktivitelerim',
-              icon: Icons.auto_awesome,
-              child: const SizedBox.shrink(),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                'Aktivitelerim',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
             ),
-
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
 
             if (isExpert) ...[
               _sectionCard(

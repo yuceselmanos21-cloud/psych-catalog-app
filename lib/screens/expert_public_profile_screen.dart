@@ -20,13 +20,6 @@ class ExpertPublicProfileScreen extends StatelessWidget {
         '${dt.year}';
   }
 
-  int _asInt(dynamic v) {
-    if (v is int) return v;
-    if (v is num) return v.toInt();
-    if (v is String) return int.tryParse(v) ?? 0;
-    return 0;
-  }
-
   Widget _statItem(String label, int value) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -38,6 +31,16 @@ class ExpertPublicProfileScreen extends StatelessWidget {
         const SizedBox(height: 2),
         Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
       ],
+    );
+  }
+
+  Widget _statItemStream(String label, Stream<int> stream) {
+    return StreamBuilder<int>(
+      stream: stream,
+      builder: (context, snap) {
+        final value = snap.data ?? 0;
+        return _statItem(label, value);
+      },
     );
   }
 
@@ -80,9 +83,6 @@ class ExpertPublicProfileScreen extends StatelessWidget {
           final specialties = data['specialties']?.toString() ?? 'Belirtilmemiş';
           final about = data['about']?.toString() ?? 'Henüz bilgi eklenmemiş.';
           final photoUrl = data['photoUrl']?.toString();
-
-          final followersCount = _asInt(data['followersCount']);
-          final followingCount = _asInt(data['followingCount']);
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
@@ -138,8 +138,16 @@ class ExpertPublicProfileScreen extends StatelessWidget {
                         spacing: 18,
                         runSpacing: 8,
                         children: [
-                          _statItem('Takipçi', followersCount),
-                          _statItem('Takip', followingCount),
+                          // ✅ CANLI COUNT
+                          _statItemStream(
+                            'Takipçi',
+                            followRepo.watchFollowersCount(expertId),
+                          ),
+                          _statItemStream(
+                            'Takip',
+                            followRepo.watchFollowingCount(expertId),
+                          ),
+
                           if (canFollow)
                             StreamBuilder<bool>(
                               stream: followRepo.watchIsFollowing(
@@ -164,45 +172,30 @@ class ExpertPublicProfileScreen extends StatelessWidget {
                                   ],
                                 );
 
+                                final onTap = () async {
+                                  try {
+                                    await followRepo.toggleFollow(
+                                      currentUserId: currentUserId,
+                                      expertId: expertId,
+                                    );
+                                  } catch (e) {
+                                    if (!context.mounted) return;
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                            'Takip işlemi başarısız: $e'),
+                                      ),
+                                    );
+                                  }
+                                };
+
                                 return isFollowing
                                     ? OutlinedButton(
-                                  onPressed: () async {
-                                    try {
-                                      await followRepo.toggleFollow(
-                                        currentUserId: currentUserId!,
-                                        expertId: expertId,
-                                      );
-                                    } catch (e) {
-                                      if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                              'Takip işlemi başarısız: $e'),
-                                        ),
-                                      );
-                                    }
-                                  },
+                                  onPressed: onTap,
                                   child: buttonChild,
                                 )
                                     : ElevatedButton(
-                                  onPressed: () async {
-                                    try {
-                                      await followRepo.toggleFollow(
-                                        currentUserId: currentUserId!,
-                                        expertId: expertId,
-                                      );
-                                    } catch (e) {
-                                      if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                              'Takip işlemi başarısız: $e'),
-                                        ),
-                                      );
-                                    }
-                                  },
+                                  onPressed: onTap,
                                   child: buttonChild,
                                 );
                               },

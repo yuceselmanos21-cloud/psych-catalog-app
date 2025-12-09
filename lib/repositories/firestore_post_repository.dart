@@ -10,6 +10,7 @@ class FirestorePostRepository implements PostRepository {
   int _asInt(dynamic value) {
     if (value is int) return value;
     if (value is double) return value.toInt();
+    if (value is num) return value.toInt();
     if (value is String) return int.tryParse(value) ?? 0;
     return 0;
   }
@@ -25,6 +26,34 @@ class FirestorePostRepository implements PostRepository {
       'editedAt': null,
     };
   }
+
+  // ✅ Reply alanları (like/dislike + alt yanıt sayısı)
+  Map<String, dynamic> _baseReplyFields() {
+    return {
+      'likeCount': 0,
+      'dislikeCount': 0,
+      'likedBy': <String>[],
+      'dislikedBy': <String>[],
+      'replyCount': 0, // child replies sayısı
+      'editedAt': null,
+    };
+  }
+
+  DocumentReference<Map<String, dynamic>> _postRef(String postId) =>
+      _db.collection('posts').doc(postId);
+
+  DocumentReference<Map<String, dynamic>> _replyRef(
+      String postId,
+      String replyId,
+      ) =>
+      _postRef(postId).collection('replies').doc(replyId);
+
+  DocumentReference<Map<String, dynamic>> _childReplyRef(
+      String postId,
+      String parentReplyId,
+      String childReplyId,
+      ) =>
+      _replyRef(postId, parentReplyId).collection('replies').doc(childReplyId);
 
   // ---------------- POST OLUŞTURMA ----------------
   @override
@@ -55,9 +84,8 @@ class FirestorePostRepository implements PostRepository {
   // ---------------- OKUMA ----------------
   @override
   Stream<QuerySnapshot<Map<String, dynamic>>> watchFeed({int? limit}) {
-    Query<Map<String, dynamic>> q = _db
-        .collection('posts')
-        .orderBy('createdAt', descending: true);
+    Query<Map<String, dynamic>> q =
+    _db.collection('posts').orderBy('createdAt', descending: true);
 
     if (limit != null && limit > 0) {
       q = q.limit(limit);
@@ -68,7 +96,7 @@ class FirestorePostRepository implements PostRepository {
 
   @override
   Stream<DocumentSnapshot<Map<String, dynamic>>> watchPost(String postId) {
-    return _db.collection('posts').doc(postId).snapshots();
+    return _postRef(postId).snapshots();
   }
 
   @override
@@ -76,9 +104,24 @@ class FirestorePostRepository implements PostRepository {
       String postId, {
         int? limit,
       }) {
-    Query<Map<String, dynamic>> q = _db
-        .collection('posts')
-        .doc(postId)
+    Query<Map<String, dynamic>> q = _postRef(postId)
+        .collection('replies')
+        .orderBy('createdAt', descending: true);
+
+    if (limit != null && limit > 0) {
+      q = q.limit(limit);
+    }
+
+    return q.snapshots();
+  }
+
+  // ✅ Child replies (yoruma yorum)
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchChildReplies(
+      String postId,
+      String parentReplyId, {
+        int? limit,
+      }) {
+    Query<Map<String, dynamic>> q = _replyRef(postId, parentReplyId)
         .collection('replies')
         .orderBy('createdAt', descending: true);
 
@@ -102,7 +145,7 @@ class FirestorePostRepository implements PostRepository {
         .snapshots();
   }
 
-  // ---------------- YANIT ----------------
+  // ---------------- YANIT (POST'A) ----------------
   @override
   Future<void> addReply({
     required String postId,
@@ -113,7 +156,7 @@ class FirestorePostRepository implements PostRepository {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
 
-    final postRef = _db.collection('posts').doc(postId);
+    final postRef = _postRef(postId);
     final replyRef = postRef.collection('replies').doc();
 
     final batch = _db.batch();
@@ -123,6 +166,7 @@ class FirestorePostRepository implements PostRepository {
       'authorId': authorId,
       'authorName': authorName,
       'createdAt': FieldValue.serverTimestamp(),
+      ..._baseReplyFields(),
     });
 
     batch.update(postRef, {
@@ -132,13 +176,47 @@ class FirestorePostRepository implements PostRepository {
     await batch.commit();
   }
 
-  // ---------------- LIKE ----------------
+  // ✅ YORUMA YANIT (1 seviye)
+  Future<void> addChildReply({
+    required String postId,
+    required String parentReplyId,
+    required String text,
+    required String authorId,
+    required String authorName,
+  }) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+
+    final parentRef = _replyRef(postId, parentReplyId);
+    final childRef = parentRef.collection('replies').doc();
+
+    final batch = _db.batch();
+
+    batch.set(childRef, {
+      'text': trimmed,
+      'authorId': authorId,
+      'authorName': authorName,
+      'createdAt': FieldValue.serverTimestamp(),
+      ..._baseReplyFields(),
+    });
+
+    // parent replyCount +1
+    batch.set(
+      parentRef,
+      {'replyCount': FieldValue.increment(1)},
+      SetOptions(merge: true),
+    );
+
+    await batch.commit();
+  }
+
+  // ---------------- LIKE (POST) ----------------
   @override
   Future<void> toggleLike({
     required String postId,
     required String userId,
   }) async {
-    final ref = _db.collection('posts').doc(postId);
+    final ref = _postRef(postId);
 
     await _db.runTransaction((tx) async {
       final snap = await tx.get(ref);
@@ -147,9 +225,8 @@ class FirestorePostRepository implements PostRepository {
       final data = snap.data() as Map<String, dynamic>? ?? {};
       final raw = data['likedBy'];
 
-      final likedBy = raw is List
-          ? raw.map((e) => e.toString()).toList()
-          : <String>[];
+      final likedBy =
+      raw is List ? raw.map((e) => e.toString()).toList() : <String>[];
 
       int likeCount = _asInt(data['likeCount'] ?? likedBy.length);
 
@@ -168,6 +245,128 @@ class FirestorePostRepository implements PostRepository {
     });
   }
 
+  // ---------------- REPLY REACTIONS ----------------
+
+  Future<void> _toggleReactionOnRef({
+    required DocumentReference<Map<String, dynamic>> ref,
+    required String userId,
+    required bool isDislike,
+  }) async {
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      if (!snap.exists) return;
+
+      final data = snap.data() ?? <String, dynamic>{};
+
+      final likedByRaw = data['likedBy'];
+      final dislikedByRaw = data['dislikedBy'];
+
+      final likedBy = likedByRaw is List
+          ? likedByRaw.map((e) => e.toString()).toList()
+          : <String>[];
+
+      final dislikedBy = dislikedByRaw is List
+          ? dislikedByRaw.map((e) => e.toString()).toList()
+          : <String>[];
+
+      int likeCount = _asInt(data['likeCount'] ?? likedBy.length);
+      int dislikeCount = _asInt(data['dislikeCount'] ?? dislikedBy.length);
+
+      if (!isDislike) {
+        // ✅ Like toggle
+        if (likedBy.contains(userId)) {
+          likedBy.remove(userId);
+          likeCount = likeCount > 0 ? likeCount - 1 : 0;
+        } else {
+          likedBy.add(userId);
+          likeCount = likeCount + 1;
+
+          // Eğer dislike vardıysa kaldır
+          if (dislikedBy.remove(userId)) {
+            dislikeCount = dislikeCount > 0 ? dislikeCount - 1 : 0;
+          }
+        }
+      } else {
+        // ✅ Dislike toggle
+        if (dislikedBy.contains(userId)) {
+          dislikedBy.remove(userId);
+          dislikeCount = dislikeCount > 0 ? dislikeCount - 1 : 0;
+        } else {
+          dislikedBy.add(userId);
+          dislikeCount = dislikeCount + 1;
+
+          // Eğer like vardıysa kaldır
+          if (likedBy.remove(userId)) {
+            likeCount = likeCount > 0 ? likeCount - 1 : 0;
+          }
+        }
+      }
+
+      tx.set(
+        ref,
+        {
+          'likedBy': likedBy,
+          'dislikedBy': dislikedBy,
+          'likeCount': likeCount,
+          'dislikeCount': dislikeCount,
+        },
+        SetOptions(merge: true),
+      );
+    });
+  }
+
+  // ✅ Top-level reply like/dislike
+  Future<void> toggleReplyLike({
+    required String postId,
+    required String replyId,
+    required String userId,
+  }) {
+    return _toggleReactionOnRef(
+      ref: _replyRef(postId, replyId),
+      userId: userId,
+      isDislike: false,
+    );
+  }
+
+  Future<void> toggleReplyDislike({
+    required String postId,
+    required String replyId,
+    required String userId,
+  }) {
+    return _toggleReactionOnRef(
+      ref: _replyRef(postId, replyId),
+      userId: userId,
+      isDislike: true,
+    );
+  }
+
+  // ✅ Child reply like/dislike
+  Future<void> toggleChildReplyLike({
+    required String postId,
+    required String parentReplyId,
+    required String replyId,
+    required String userId,
+  }) {
+    return _toggleReactionOnRef(
+      ref: _childReplyRef(postId, parentReplyId, replyId),
+      userId: userId,
+      isDislike: false,
+    );
+  }
+
+  Future<void> toggleChildReplyDislike({
+    required String postId,
+    required String parentReplyId,
+    required String replyId,
+    required String userId,
+  }) {
+    return _toggleReactionOnRef(
+      ref: _childReplyRef(postId, parentReplyId, replyId),
+      userId: userId,
+      isDislike: true,
+    );
+  }
+
   // ---------------- REPOST (✅ daha sağlam) ----------------
   @override
   Future<void> repostPost({
@@ -178,7 +377,7 @@ class FirestorePostRepository implements PostRepository {
     required String authorName,
     required String authorRole,
   }) async {
-    final originalRef = _db.collection('posts').doc(originalPostId);
+    final originalRef = _postRef(originalPostId);
     final newRef = _db.collection('posts').doc();
 
     final batch = _db.batch();
@@ -210,7 +409,7 @@ class FirestorePostRepository implements PostRepository {
     final text = newText.trim();
     if (text.isEmpty) return;
 
-    await _db.collection('posts').doc(postId).update({
+    await _postRef(postId).update({
       'text': text,
       'editedAt': FieldValue.serverTimestamp(),
     });
@@ -219,8 +418,6 @@ class FirestorePostRepository implements PostRepository {
   // ---------------- SİL ----------------
   @override
   Future<void> deletePost(String postId) async {
-    await _db.collection('posts').doc(postId).delete();
-    // Replies alt koleksiyonu otomatik silinmez.
-    // İleride Cloud Function ile temizleyebiliriz.
+    await _postRef(postId).delete();
   }
 }

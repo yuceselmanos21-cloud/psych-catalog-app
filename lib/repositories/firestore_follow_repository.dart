@@ -10,17 +10,23 @@ class FirestoreFollowRepository implements FollowRepository {
   DocumentReference<Map<String, dynamic>> _userDoc(String uid) =>
       _db.collection('users').doc(uid);
 
+  CollectionReference<Map<String, dynamic>> _followersCol(String expertId) =>
+      _userDoc(expertId).collection('followers');
+
+  CollectionReference<Map<String, dynamic>> _followingCol(String userId) =>
+      _userDoc(userId).collection('following');
+
   DocumentReference<Map<String, dynamic>> _followerDoc({
     required String expertId,
     required String currentUserId,
   }) =>
-      _userDoc(expertId).collection('followers').doc(currentUserId);
+      _followersCol(expertId).doc(currentUserId);
 
   DocumentReference<Map<String, dynamic>> _followingDoc({
     required String currentUserId,
     required String expertId,
   }) =>
-      _userDoc(currentUserId).collection('following').doc(expertId);
+      _followingCol(currentUserId).doc(expertId);
 
   @override
   Stream<bool> watchIsFollowing({
@@ -33,28 +39,16 @@ class FirestoreFollowRepository implements FollowRepository {
     ).snapshots().map((doc) => doc.exists);
   }
 
+  /// ✅ Sayaçlar artık user doc alanından değil,
+  /// subcollection size üzerinden gelir -> rules ile uyumlu
   @override
   Stream<int> watchFollowersCount(String expertId) {
-    return _userDoc(expertId).snapshots().map((doc) {
-      final data = doc.data() ?? <String, dynamic>{};
-      final v = data['followersCount'];
-      if (v is int) return v;
-      if (v is num) return v.toInt();
-      if (v is String) return int.tryParse(v) ?? 0;
-      return 0;
-    });
+    return _followersCol(expertId).snapshots().map((snap) => snap.size);
   }
 
   @override
   Stream<int> watchFollowingCount(String userId) {
-    return _userDoc(userId).snapshots().map((doc) {
-      final data = doc.data() ?? <String, dynamic>{};
-      final v = data['followingCount'];
-      if (v is int) return v;
-      if (v is num) return v.toInt();
-      if (v is String) return int.tryParse(v) ?? 0;
-      return 0;
-    });
+    return _followingCol(userId).snapshots().map((snap) => snap.size);
   }
 
   @override
@@ -68,18 +62,15 @@ class FirestoreFollowRepository implements FollowRepository {
       expertId: expertId,
       currentUserId: currentUserId,
     );
+
     final followingRef = _followingDoc(
       currentUserId: currentUserId,
       expertId: expertId,
     );
 
-    bool created = false;
-
     await _db.runTransaction((tx) async {
       final followerSnap = await tx.get(followerRef);
       if (followerSnap.exists) return;
-
-      created = true;
 
       tx.set(followerRef, {
         'userId': currentUserId,
@@ -91,22 +82,6 @@ class FirestoreFollowRepository implements FollowRepository {
         'createdAt': FieldValue.serverTimestamp(),
       });
     });
-
-    // ✅ Best-effort counter (rules izin verirse)
-    if (created) {
-      try {
-        await _userDoc(expertId).set(
-          {'followersCount': FieldValue.increment(1)},
-          SetOptions(merge: true),
-        );
-        await _userDoc(currentUserId).set(
-          {'followingCount': FieldValue.increment(1)},
-          SetOptions(merge: true),
-        );
-      } catch (_) {
-        // Prod rules sıkıysa burada sessiz geçer; follow yine çalışır.
-      }
-    }
   }
 
   @override
@@ -120,36 +95,19 @@ class FirestoreFollowRepository implements FollowRepository {
       expertId: expertId,
       currentUserId: currentUserId,
     );
+
     final followingRef = _followingDoc(
       currentUserId: currentUserId,
       expertId: expertId,
     );
 
-    bool removed = false;
-
     await _db.runTransaction((tx) async {
       final followerSnap = await tx.get(followerRef);
       if (!followerSnap.exists) return;
 
-      removed = true;
-
       tx.delete(followerRef);
       tx.delete(followingRef);
     });
-
-    // ✅ Best-effort counter
-    if (removed) {
-      try {
-        await _userDoc(expertId).set(
-          {'followersCount': FieldValue.increment(-1)},
-          SetOptions(merge: true),
-        );
-        await _userDoc(currentUserId).set(
-          {'followingCount': FieldValue.increment(-1)},
-          SetOptions(merge: true),
-        );
-      } catch (_) {}
-    }
   }
 
   @override

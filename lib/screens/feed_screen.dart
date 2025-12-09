@@ -22,8 +22,8 @@ class _FeedScreenState extends State<FeedScreen> {
 
   String _selectedType = 'text';
 
-  final _postRepo = FirestorePostRepository();
-  final _userRepo = FirestoreUserRepository();
+  final FirestorePostRepository _postRepo = FirestorePostRepository();
+  final FirestoreUserRepository _userRepo = FirestoreUserRepository();
 
   User? get _currentUser => FirebaseAuth.instance.currentUser;
 
@@ -123,20 +123,17 @@ class _FeedScreenState extends State<FeedScreen> {
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 _buildTypeChip('text', Icons.text_fields, 'Metin'),
-                const SizedBox(width: 8),
                 _buildTypeChip('image', Icons.image, 'Fotoğraf'),
-                const SizedBox(width: 8),
                 _buildTypeChip('video', Icons.videocam, 'Video'),
-                const SizedBox(width: 8),
                 _buildTypeChip('audio', Icons.graphic_eq, 'Ses'),
               ],
             ),
             const SizedBox(height: 8),
-
             TextField(
               controller: _postCtrl,
               maxLines: 3,
@@ -147,35 +144,11 @@ class _FeedScreenState extends State<FeedScreen> {
                 border: const OutlineInputBorder(),
               ),
             ),
-
             if (_selectedType != 'text') ...[
               const SizedBox(height: 6),
-              Row(
-                children: [
-                  Icon(
-                    _selectedType == 'image'
-                        ? Icons.image_outlined
-                        : _selectedType == 'video'
-                        ? Icons.videocam_outlined
-                        : Icons.audiotrack_outlined,
-                    size: 16,
-                    color: Colors.grey[700],
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _selectedType == 'image'
-                        ? 'Fotoğraf eklenecek (ileride).'
-                        : _selectedType == 'video'
-                        ? 'Video eklenecek (ileride).'
-                        : 'Ses eklenecek (ileride).',
-                    style: TextStyle(fontSize: 11, color: Colors.grey[700]),
-                  ),
-                ],
-              ),
+              _buildComingSoonRow(_selectedType),
             ],
-
             const SizedBox(height: 8),
-
             Align(
               alignment: Alignment.centerRight,
               child: ElevatedButton.icon(
@@ -196,26 +169,54 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
+  Widget _buildComingSoonRow(String type) {
+    IconData icon;
+    String text;
+    switch (type) {
+      case 'image':
+        icon = Icons.image_outlined;
+        text = 'Fotoğraf eklenecek (ileride).';
+        break;
+      case 'video':
+        icon = Icons.videocam_outlined;
+        text = 'Video eklenecek (ileride).';
+        break;
+      default:
+        icon = Icons.audiotrack_outlined;
+        text = 'Ses eklenecek (ileride).';
+    }
+
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Colors.grey[700]),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+        ),
+      ],
+    );
+  }
+
   Widget _buildTypeChip(String value, IconData icon, String label) {
     final isSelected = _selectedType == value;
+    final fg = isSelected ? Colors.white : Colors.grey[700];
+
     return ChoiceChip(
       selected: isSelected,
       selectedColor: Colors.deepPurple,
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            icon,
-            size: 16,
-            color: isSelected ? Colors.white : Colors.grey[700],
-          ),
+          Icon(icon, size: 16, color: fg),
           const SizedBox(width: 4),
-          Text(label),
+          Text(
+            label,
+            style: TextStyle(color: fg),
+          ),
         ],
       ),
-      onSelected: (_) {
-        setState(() => _selectedType = value);
-      },
+      onSelected: (_) => setState(() => _selectedType = value),
     );
   }
 
@@ -239,7 +240,9 @@ class _FeedScreenState extends State<FeedScreen> {
       );
 
       _postCtrl.clear();
-      setState(() => _selectedType = 'text');
+      if (mounted) {
+        setState(() => _selectedType = 'text');
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -266,18 +269,15 @@ class _FeedScreenState extends State<FeedScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+        final docs = snapshot.data?.docs ?? const [];
+        if (docs.isEmpty) {
           return const Center(child: Text('Henüz hiç paylaşım yok.'));
         }
-
-        final docs = snapshot.data!.docs;
 
         return ListView.builder(
           padding: EdgeInsets.zero,
           itemCount: docs.length,
-          itemBuilder: (context, index) {
-            return _buildPostCard(docs[index]);
-          },
+          itemBuilder: (context, index) => _buildPostCard(docs[index]),
         );
       },
     );
@@ -291,11 +291,13 @@ class _FeedScreenState extends State<FeedScreen> {
     final authorName = data['authorName']?.toString() ?? 'Kullanıcı';
     final authorId = data['authorId']?.toString();
     final role = data['authorRole']?.toString() ?? 'client';
+    final postType = data['type']?.toString() ?? 'text';
 
     final ts = data['createdAt'] as Timestamp?;
     final createdAt = ts?.toDate();
 
-    final postType = data['type']?.toString() ?? 'text';
+    final editedTs = data['editedAt'] as Timestamp?;
+    final editedAt = editedTs?.toDate();
 
     final likedByRaw = data['likedBy'];
     final List<String> likedBy = likedByRaw is List
@@ -311,17 +313,8 @@ class _FeedScreenState extends State<FeedScreen> {
     final isLiked = currentUserId != null && likedBy.contains(currentUserId);
     final isOwner = currentUserId != null && currentUserId == authorId;
 
-    final editedTs = data['editedAt'] as Timestamp?;
-    final editedAt = editedTs?.toDate();
-
     return InkWell(
-      onTap: () {
-        Navigator.pushNamed(
-          context,
-          '/postDetail',
-          arguments: doc.id,
-        );
-      },
+      onTap: () => _openPostDetail(doc.id),
       child: Card(
         margin: const EdgeInsets.only(bottom: 8),
         child: Padding(
@@ -329,144 +322,179 @@ class _FeedScreenState extends State<FeedScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // header
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  GestureDetector(
-                    onTap: () => _openAuthorProfile(authorId, role),
-                    child: CircleAvatar(
-                      child: Text(
-                        authorName.isNotEmpty
-                            ? authorName[0].toUpperCase()
-                            : '?',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => _openAuthorProfile(authorId, role),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            authorName,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            isExpertPost ? 'Uzman' : 'Danışan',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isExpertPost
-                                  ? Colors.deepPurple
-                                  : Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (createdAt != null)
-                    Text(
-                      _formatDate(createdAt) +
-                          (editedAt != null ? ' · düzenlendi' : ''),
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
-                  if (isOwner)
-                    PopupMenuButton<String>(
-                      onSelected: (value) {
-                        if (value == 'edit') {
-                          _showEditPostDialog(doc.id, text);
-                        } else if (value == 'delete') {
-                          _confirmDeletePost(doc.id);
-                        }
-                      },
-                      itemBuilder: (context) => const [
-                        PopupMenuItem(value: 'edit', child: Text('Düzenle')),
-                        PopupMenuItem(value: 'delete', child: Text('Sil')),
-                      ],
-                    ),
-                ],
+              _buildPostHeader(
+                authorName: authorName,
+                authorId: authorId,
+                isExpertPost: isExpertPost,
+                createdAt: createdAt,
+                editedAt: editedAt,
+                isOwner: isOwner,
+                postId: doc.id,
+                text: text,
               ),
-
               const SizedBox(height: 8),
-
               if (text.isNotEmpty) Text(text),
-
               const SizedBox(height: 8),
-
               if (postType == 'image') _buildFakeImageBox(),
               if (postType == 'video') _buildFakeVideoBox(),
               if (postType == 'audio') _buildFakeAudioBox(),
-
               const SizedBox(height: 8),
-
-              // actions
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  _buildActionButton(
-                    icon: Icons.mode_comment_outlined,
-                    label: replyCount > 0 ? replyCount.toString() : '',
-                    onTap: () {
-                      Navigator.pushNamed(
-                        context,
-                        '/postDetail',
-                        arguments: doc.id,
-                      );
-                    },
-                  ),
-                  _buildActionButton(
-                    icon: Icons.repeat,
-                    label: repostCount > 0 ? repostCount.toString() : '',
-                    onTap: () async {
-                      final user = _currentUser;
-                      if (user == null) return;
-
-                      try {
-                        await _postRepo.repostPost(
-                          originalPostId: doc.id,
-                          text: text,
-                          type: postType,
-                          authorId: user.uid,
-                          authorName: _name ?? 'Kullanıcı',
-                          authorRole: _role ?? 'client',
-                        );
-                      } catch (e) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Repost yapılamadı: $e')),
-                        );
-                      }
-                    },
-                  ),
-                  _buildActionButton(
-                    icon: isLiked ? Icons.favorite : Icons.favorite_border,
-                    label: likeCount > 0 ? likeCount.toString() : '',
-                    iconColor: isLiked ? Colors.red : Colors.grey[700],
-                    onTap: () async {
-                      if (currentUserId == null) return;
-                      try {
-                        await _postRepo.toggleLike(
-                          postId: doc.id,
-                          userId: currentUserId,
-                        );
-                      } catch (e) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Beğeni güncellenemedi: $e')),
-                        );
-                      }
-                    },
-                  ),
-                ],
+              _buildPostActions(
+                postId: doc.id,
+                text: text,
+                type: postType,
+                replyCount: replyCount,
+                repostCount: repostCount,
+                likeCount: likeCount,
+                isLiked: isLiked,
+                currentUserId: currentUserId,
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildPostHeader({
+    required String authorName,
+    required String? authorId,
+    required bool isExpertPost,
+    required DateTime? createdAt,
+    required DateTime? editedAt,
+    required bool isOwner,
+    required String postId,
+    required String text,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        GestureDetector(
+          onTap: () => _openAuthorProfile(authorId, isExpertPost ? 'expert' : 'client'),
+          child: CircleAvatar(
+            child: Text(
+              authorName.isNotEmpty ? authorName[0].toUpperCase() : '?',
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: GestureDetector(
+            onTap: () => _openAuthorProfile(authorId, isExpertPost ? 'expert' : 'client'),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  authorName,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  isExpertPost ? 'Uzman' : 'Danışan',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isExpertPost ? Colors.deepPurple : Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (createdAt != null)
+          Text(
+            _formatDate(createdAt) + (editedAt != null ? ' · düzenlendi' : ''),
+            style: const TextStyle(fontSize: 11, color: Colors.grey),
+          ),
+        if (isOwner)
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'edit') {
+                _showEditPostDialog(postId, text);
+              } else if (value == 'delete') {
+                _confirmDeletePost(postId);
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'edit', child: Text('Düzenle')),
+              PopupMenuItem(value: 'delete', child: Text('Sil')),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _buildPostActions({
+    required String postId,
+    required String text,
+    required String type,
+    required int replyCount,
+    required int repostCount,
+    required int likeCount,
+    required bool isLiked,
+    required String? currentUserId,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        _buildActionButton(
+          icon: Icons.mode_comment_outlined,
+          label: replyCount > 0 ? replyCount.toString() : '',
+          onTap: () => _openPostDetail(postId),
+        ),
+        _buildActionButton(
+          icon: Icons.repeat,
+          label: repostCount > 0 ? repostCount.toString() : '',
+          onTap: () => _handleRepost(
+            originalPostId: postId,
+            text: text,
+            type: type,
+          ),
+        ),
+        _buildActionButton(
+          icon: isLiked ? Icons.favorite : Icons.favorite_border,
+          label: likeCount > 0 ? likeCount.toString() : '',
+          iconColor: isLiked ? Colors.red : Colors.grey[700],
+          onTap: () async {
+            if (currentUserId == null) return;
+            try {
+              await _postRepo.toggleLike(
+                postId: postId,
+                userId: currentUserId,
+              );
+            } catch (e) {
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Beğeni güncellenemedi: $e')),
+              );
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _handleRepost({
+    required String originalPostId,
+    required String text,
+    required String type,
+  }) async {
+    final user = _currentUser;
+    if (user == null) return;
+
+    try {
+      await _postRepo.repostPost(
+        originalPostId: originalPostId,
+        text: text,
+        type: type,
+        authorId: user.uid,
+        authorName: _name ?? 'Kullanıcı',
+        authorRole: _role ?? 'client',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Repost yapılamadı: $e')),
+      );
+    }
   }
 
   Widget _buildActionButton({
@@ -493,6 +521,14 @@ class _FeedScreenState extends State<FeedScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  void _openPostDetail(String postId) {
+    Navigator.pushNamed(
+      context,
+      '/postDetail',
+      arguments: postId,
     );
   }
 
@@ -578,7 +614,10 @@ class _FeedScreenState extends State<FeedScreen> {
         '/publicExpertProfile',
         arguments: authorId,
       );
-    } else if (currentUserId != null && currentUserId == authorId) {
+      return;
+    }
+
+    if (currentUserId != null && currentUserId == authorId) {
       Navigator.pushNamed(context, '/profile');
     }
   }
@@ -618,8 +657,8 @@ class _FeedScreenState extends State<FeedScreen> {
         borderRadius: BorderRadius.circular(12),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: const [
+      child: const Row(
+        children: [
           Icon(Icons.graphic_eq, color: Colors.deepPurple),
           SizedBox(width: 8),
           Text('Ses kaydı (örnek alan)'),
@@ -634,6 +673,7 @@ class _FeedScreenState extends State<FeedScreen> {
   int _asInt(dynamic value) {
     if (value is int) return value;
     if (value is double) return value.toInt();
+    if (value is num) return value.toInt();
     if (value is String) return int.tryParse(value) ?? 0;
     return 0;
   }
@@ -686,19 +726,17 @@ class _FeedScreenState extends State<FeedScreen> {
               style: const TextStyle(fontSize: 16),
             ),
             const SizedBox(height: 8),
-
             _buildRoleActions(isExpert),
             const SizedBox(height: 16),
-
-            if (isExpert) _buildPostComposer(),
-            if (isExpert) const SizedBox(height: 16),
-
+            if (isExpert) ...[
+              _buildPostComposer(),
+              const SizedBox(height: 16),
+            ],
             const Text(
               'Sosyal Akış',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-
             Expanded(child: _buildFeedList()),
           ],
         ),

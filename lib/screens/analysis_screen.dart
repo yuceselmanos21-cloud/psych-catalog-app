@@ -10,16 +10,25 @@ class AnalysisScreen extends StatefulWidget {
 
 class _AnalysisScreenState extends State<AnalysisScreen> {
   final _textCtrl = TextEditingController();
+
   bool _loading = false;
   String? _result;
   String? _error;
 
-  DateTime? _lastRequestAt;
+  // ✅ Cooldown
   static const Duration _cooldown = Duration(seconds: 8);
+  DateTime? _lastRunAt;
 
-  bool get _isCoolingDown {
-    if (_lastRequestAt == null) return false;
-    return DateTime.now().difference(_lastRequestAt!) < _cooldown;
+  bool get _inCooldown {
+    if (_lastRunAt == null) return false;
+    return DateTime.now().difference(_lastRunAt!) < _cooldown;
+  }
+
+  int get _cooldownRemaining {
+    if (_lastRunAt == null) return 0;
+    final diff = DateTime.now().difference(_lastRunAt!);
+    final remain = _cooldown.inSeconds - diff.inSeconds;
+    return remain.clamp(0, _cooldown.inSeconds);
   }
 
   @override
@@ -29,8 +38,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   Future<void> _runAnalysis() async {
-    final input = _textCtrl.text.trim();
+    if (_loading || _inCooldown) return;
 
+    final input = _textCtrl.text.trim();
     if (input.isEmpty) {
       setState(() {
         _error = 'Lütfen analiz için bir metin girin.';
@@ -39,17 +49,16 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       return;
     }
 
-    if (_loading || _isCoolingDown) return;
-
     setState(() {
       _loading = true;
       _error = null;
-      _lastRequestAt = DateTime.now();
+      _lastRunAt = DateTime.now();
     });
 
     try {
       final response = await AnalysisService.generateAnalysis(input);
       if (!mounted) return;
+
       setState(() {
         _result = response;
       });
@@ -69,7 +78,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final disabled = _loading || _isCoolingDown;
+    final buttonText = _loading
+        ? 'Analiz ediliyor...'
+        : _inCooldown
+        ? 'Lütfen bekle ($_cooldownRemaining sn)'
+        : 'Analiz Et';
 
     return Scaffold(
       appBar: AppBar(title: const Text('AI Analizi')),
@@ -90,18 +103,14 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: disabled ? null : _runAnalysis,
+                onPressed: (_loading || _inCooldown) ? null : _runAnalysis,
                 child: _loading
                     ? const SizedBox(
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-                    : Text(
-                  _isCoolingDown
-                      ? 'Kısa bir ara ver...'
-                      : 'Analiz Et',
-                ),
+                    : Text(buttonText),
               ),
             ),
             const SizedBox(height: 16),
