@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -30,6 +31,14 @@ Future<void> main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  // ✅ Web için ekstra stabilite
+  if (kIsWeb) {
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: false,
+    );
+  }
+
   runApp(const PsychCatalogApp());
 }
 
@@ -46,31 +55,25 @@ class PsychCatalogApp extends StatelessWidget {
         colorSchemeSeed: Colors.deepPurple,
       ),
 
-      // güvenli varsayılan
       initialRoute: '/login',
 
       routes: {
-        // Auth (tek kaynak)
         '/auth': (_) => const AuthScreen(),
         '/login': (_) => const AuthScreen(initialTab: AuthInitialTab.login),
         '/signup': (_) => const AuthScreen(initialTab: AuthInitialTab.signup),
 
-        // core
         '/feed': (_) => const FeedScreen(),
         '/profile': (_) => const ProfileScreen(),
         '/experts': (_) => const ExpertsListScreen(),
 
-        // tests
         '/tests': (_) => const TestsListScreen(),
         '/allTests': (_) => const TestsScreen(),
         '/solvedTests': (_) => const SolvedTestsScreen(),
         '/analysis': (_) => const AnalysisScreen(),
 
-        // expert test flows
         '/createTest': (_) => const CreateTestScreen(),
         '/expertTests': (_) => const ExpertTestListScreen(),
 
-        // posts
         '/createPost': (_) => const PostCreateScreen(),
       },
 
@@ -164,10 +167,7 @@ class PsychCatalogApp extends StatelessWidget {
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(
-              message,
-              textAlign: TextAlign.center,
-            ),
+            child: Text(message, textAlign: TextAlign.center),
           ),
         ),
       ),

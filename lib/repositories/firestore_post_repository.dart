@@ -7,6 +7,8 @@ class FirestorePostRepository implements PostRepository {
   FirestorePostRepository({FirebaseFirestore? firestore})
       : _db = firestore ?? FirebaseFirestore.instance;
 
+  // ---------------- HELPERS ----------------
+
   int _asInt(dynamic value) {
     if (value is int) return value;
     if (value is double) return value.toInt();
@@ -15,10 +17,15 @@ class FirestorePostRepository implements PostRepository {
     return 0;
   }
 
+  List<String> _asStringList(dynamic raw) {
+    if (raw is List) return raw.map((e) => e.toString()).toList();
+    return <String>[];
+  }
+
   Map<String, dynamic> _baseTwitterFields() {
     return {
       'likeCount': 0,
-      'replyCount': 0,
+      'replyCount': 0, // top-level yorum sayısı
       'repostCount': 0,
       'quoteCount': 0,
       'likedBy': <String>[],
@@ -27,35 +34,28 @@ class FirestorePostRepository implements PostRepository {
     };
   }
 
-  // ✅ Reply alanları (like/dislike + alt yanıt sayısı)
   Map<String, dynamic> _baseReplyFields() {
     return {
       'likeCount': 0,
       'dislikeCount': 0,
       'likedBy': <String>[],
       'dislikedBy': <String>[],
-      'replyCount': 0, // child replies sayısı
+      'replyCount': 0, // child sayısı
       'editedAt': null,
+      'deleted': false,
     };
   }
+
+  // ---------------- REFS ----------------
 
   DocumentReference<Map<String, dynamic>> _postRef(String postId) =>
       _db.collection('posts').doc(postId);
 
-  DocumentReference<Map<String, dynamic>> _replyRef(
-      String postId,
-      String replyId,
-      ) =>
-      _postRef(postId).collection('replies').doc(replyId);
+  DocumentReference<Map<String, dynamic>> _replyRef(String replyId) =>
+      _db.collection('replies').doc(replyId);
 
-  DocumentReference<Map<String, dynamic>> _childReplyRef(
-      String postId,
-      String parentReplyId,
-      String childReplyId,
-      ) =>
-      _replyRef(postId, parentReplyId).collection('replies').doc(childReplyId);
+  // ---------------- POSTS: CREATE ----------------
 
-  // ---------------- POST OLUŞTURMA ----------------
   @override
   Future<void> sendPost(
       String content, {
@@ -81,7 +81,8 @@ class FirestorePostRepository implements PostRepository {
     await _db.collection('posts').add(payload);
   }
 
-  // ---------------- OKUMA ----------------
+  // ---------------- POSTS: READ ----------------
+
   @override
   Stream<QuerySnapshot<Map<String, dynamic>>> watchFeed({int? limit}) {
     Query<Map<String, dynamic>> q =
@@ -100,39 +101,6 @@ class FirestorePostRepository implements PostRepository {
   }
 
   @override
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchReplies(
-      String postId, {
-        int? limit,
-      }) {
-    Query<Map<String, dynamic>> q = _postRef(postId)
-        .collection('replies')
-        .orderBy('createdAt', descending: true);
-
-    if (limit != null && limit > 0) {
-      q = q.limit(limit);
-    }
-
-    return q.snapshots();
-  }
-
-  // ✅ Child replies (yoruma yorum)
-  Stream<QuerySnapshot<Map<String, dynamic>>> watchChildReplies(
-      String postId,
-      String parentReplyId, {
-        int? limit,
-      }) {
-    Query<Map<String, dynamic>> q = _replyRef(postId, parentReplyId)
-        .collection('replies')
-        .orderBy('createdAt', descending: true);
-
-    if (limit != null && limit > 0) {
-      q = q.limit(limit);
-    }
-
-    return q.snapshots();
-  }
-
-  @override
   Stream<QuerySnapshot<Map<String, dynamic>>> watchPostsByAuthor(
       String authorId, {
         int limit = 10,
@@ -145,7 +113,65 @@ class FirestorePostRepository implements PostRepository {
         .snapshots();
   }
 
-  // ---------------- YANIT (POST'A) ----------------
+  // ---------------- REPLIES: READ (GLOBAL MODEL) ----------------
+
+  /// Top-level replies: parentReplyId == null
+  @override
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchReplies(
+      String postId, {
+        int? limit,
+      }) {
+    Query<Map<String, dynamic>> q = _db
+        .collection('replies')
+        .where('rootPostId', isEqualTo: postId)
+        .where('parentReplyId', isNull: true)
+        .orderBy('createdAt', descending: true);
+
+    if (limit != null && limit > 0) {
+      q = q.limit(limit);
+    }
+
+    return q.snapshots();
+  }
+
+  /// Child replies of any reply
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchChildReplies(
+      String postId, // eski imza uyumu için duruyor
+      String parentReplyId, {
+        int? limit,
+      }) {
+    Query<Map<String, dynamic>> q = _db
+        .collection('replies')
+        .where('parentReplyId', isEqualTo: parentReplyId)
+        .orderBy('createdAt', descending: true);
+
+    if (limit != null && limit > 0) {
+      q = q.limit(limit);
+    }
+
+    return q.snapshots();
+  }
+
+  /// PostDetail için: post’a bağlı tüm replies (top + child)
+  Stream<QuerySnapshot<Map<String, dynamic>>> watchAllRepliesForPost(
+      String postId, {
+        int? limit,
+      }) {
+    Query<Map<String, dynamic>> q = _db
+        .collection('replies')
+        .where('rootPostId', isEqualTo: postId)
+        .orderBy('createdAt', descending: true);
+
+    if (limit != null && limit > 0) {
+      q = q.limit(limit);
+    }
+
+    return q.snapshots();
+  }
+
+  // ---------------- REPLIES: CREATE ----------------
+
+  /// Post'a top-level yorum
   @override
   Future<void> addReply({
     required String postId,
@@ -157,11 +183,13 @@ class FirestorePostRepository implements PostRepository {
     if (trimmed.isEmpty) return;
 
     final postRef = _postRef(postId);
-    final replyRef = postRef.collection('replies').doc();
+    final replyRef = _db.collection('replies').doc();
 
     final batch = _db.batch();
 
     batch.set(replyRef, {
+      'rootPostId': postId,
+      'parentReplyId': null,
       'text': trimmed,
       'authorId': authorId,
       'authorName': authorName,
@@ -169,6 +197,7 @@ class FirestorePostRepository implements PostRepository {
       ..._baseReplyFields(),
     });
 
+    // top-level yorum sayısı
     batch.update(postRef, {
       'replyCount': FieldValue.increment(1),
     });
@@ -176,7 +205,7 @@ class FirestorePostRepository implements PostRepository {
     await batch.commit();
   }
 
-  // ✅ YORUMA YANIT (1 seviye)
+  /// Reply’ye reply (child)
   Future<void> addChildReply({
     required String postId,
     required String parentReplyId,
@@ -187,12 +216,14 @@ class FirestorePostRepository implements PostRepository {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
 
-    final parentRef = _replyRef(postId, parentReplyId);
-    final childRef = parentRef.collection('replies').doc();
+    final parentRef = _replyRef(parentReplyId);
+    final childRef = _db.collection('replies').doc();
 
     final batch = _db.batch();
 
     batch.set(childRef, {
+      'rootPostId': postId,
+      'parentReplyId': parentReplyId,
       'text': trimmed,
       'authorId': authorId,
       'authorName': authorName,
@@ -200,7 +231,7 @@ class FirestorePostRepository implements PostRepository {
       ..._baseReplyFields(),
     });
 
-    // parent replyCount +1
+    // parent'ın child sayısı
     batch.set(
       parentRef,
       {'replyCount': FieldValue.increment(1)},
@@ -210,7 +241,70 @@ class FirestorePostRepository implements PostRepository {
     await batch.commit();
   }
 
-  // ---------------- LIKE (POST) ----------------
+  // ---------------- REPLIES: DELETE (FIXED) ----------------
+
+  /// Global model uyumlu yorum silme.
+  /// - Çocuk varsa: soft delete (ağacı korur)
+  /// - Çocuk yoksa: hard delete + sayaç düzeltme
+  Future<void> deleteReply({
+    required String postId,
+    required String replyId,
+    required String userId,
+  }) async {
+    final replyRef = _replyRef(replyId);
+    final postRef = _postRef(postId);
+
+    await _db.runTransaction((tx) async {
+      final replySnap = await tx.get(replyRef);
+      if (!replySnap.exists) return;
+
+      final data = replySnap.data() ?? <String, dynamic>{};
+
+      final authorId = data['authorId']?.toString();
+      if (authorId != null && authorId != userId) {
+        throw Exception('not-owner');
+      }
+
+      final parentReplyId = data['parentReplyId']?.toString();
+      final childCount = _asInt(data['replyCount'] ?? 0);
+
+      // Child varsa -> soft delete
+      if (childCount > 0) {
+        tx.set(
+          replyRef,
+          {
+            'text': '[Silindi]',
+            'deleted': true,
+            'editedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+        return;
+      }
+
+      // Leaf -> hard delete
+      tx.delete(replyRef);
+
+      // Sayaç düzeltme (increment ile daha stabil)
+      if (parentReplyId == null || parentReplyId.isEmpty) {
+        tx.set(
+          postRef,
+          {'replyCount': FieldValue.increment(-1)},
+          SetOptions(merge: true),
+        );
+      } else {
+        final parentRef = _replyRef(parentReplyId);
+        tx.set(
+          parentRef,
+          {'replyCount': FieldValue.increment(-1)},
+          SetOptions(merge: true),
+        );
+      }
+    });
+  }
+
+  // ---------------- POSTS: LIKE ----------------
+
   @override
   Future<void> toggleLike({
     required String postId,
@@ -222,11 +316,8 @@ class FirestorePostRepository implements PostRepository {
       final snap = await tx.get(ref);
       if (!snap.exists) return;
 
-      final data = snap.data() as Map<String, dynamic>? ?? {};
-      final raw = data['likedBy'];
-
-      final likedBy =
-      raw is List ? raw.map((e) => e.toString()).toList() : <String>[];
+      final data = snap.data() ?? <String, dynamic>{};
+      final likedBy = _asStringList(data['likedBy']);
 
       int likeCount = _asInt(data['likeCount'] ?? likedBy.length);
 
@@ -245,7 +336,7 @@ class FirestorePostRepository implements PostRepository {
     });
   }
 
-  // ---------------- REPLY REACTIONS ----------------
+  // ---------------- REPLIES: LIKE / DISLIKE ----------------
 
   Future<void> _toggleReactionOnRef({
     required DocumentReference<Map<String, dynamic>> ref,
@@ -258,22 +349,13 @@ class FirestorePostRepository implements PostRepository {
 
       final data = snap.data() ?? <String, dynamic>{};
 
-      final likedByRaw = data['likedBy'];
-      final dislikedByRaw = data['dislikedBy'];
-
-      final likedBy = likedByRaw is List
-          ? likedByRaw.map((e) => e.toString()).toList()
-          : <String>[];
-
-      final dislikedBy = dislikedByRaw is List
-          ? dislikedByRaw.map((e) => e.toString()).toList()
-          : <String>[];
+      final likedBy = _asStringList(data['likedBy']);
+      final dislikedBy = _asStringList(data['dislikedBy']);
 
       int likeCount = _asInt(data['likeCount'] ?? likedBy.length);
       int dislikeCount = _asInt(data['dislikeCount'] ?? dislikedBy.length);
 
       if (!isDislike) {
-        // ✅ Like toggle
         if (likedBy.contains(userId)) {
           likedBy.remove(userId);
           likeCount = likeCount > 0 ? likeCount - 1 : 0;
@@ -281,13 +363,11 @@ class FirestorePostRepository implements PostRepository {
           likedBy.add(userId);
           likeCount = likeCount + 1;
 
-          // Eğer dislike vardıysa kaldır
           if (dislikedBy.remove(userId)) {
             dislikeCount = dislikeCount > 0 ? dislikeCount - 1 : 0;
           }
         }
       } else {
-        // ✅ Dislike toggle
         if (dislikedBy.contains(userId)) {
           dislikedBy.remove(userId);
           dislikeCount = dislikeCount > 0 ? dislikeCount - 1 : 0;
@@ -295,7 +375,6 @@ class FirestorePostRepository implements PostRepository {
           dislikedBy.add(userId);
           dislikeCount = dislikeCount + 1;
 
-          // Eğer like vardıysa kaldır
           if (likedBy.remove(userId)) {
             likeCount = likeCount > 0 ? likeCount - 1 : 0;
           }
@@ -315,14 +394,13 @@ class FirestorePostRepository implements PostRepository {
     });
   }
 
-  // ✅ Top-level reply like/dislike
   Future<void> toggleReplyLike({
     required String postId,
     required String replyId,
     required String userId,
   }) {
     return _toggleReactionOnRef(
-      ref: _replyRef(postId, replyId),
+      ref: _replyRef(replyId),
       userId: userId,
       isDislike: false,
     );
@@ -334,13 +412,12 @@ class FirestorePostRepository implements PostRepository {
     required String userId,
   }) {
     return _toggleReactionOnRef(
-      ref: _replyRef(postId, replyId),
+      ref: _replyRef(replyId),
       userId: userId,
       isDislike: true,
     );
   }
 
-  // ✅ Child reply like/dislike
   Future<void> toggleChildReplyLike({
     required String postId,
     required String parentReplyId,
@@ -348,7 +425,7 @@ class FirestorePostRepository implements PostRepository {
     required String userId,
   }) {
     return _toggleReactionOnRef(
-      ref: _childReplyRef(postId, parentReplyId, replyId),
+      ref: _replyRef(replyId),
       userId: userId,
       isDislike: false,
     );
@@ -361,13 +438,14 @@ class FirestorePostRepository implements PostRepository {
     required String userId,
   }) {
     return _toggleReactionOnRef(
-      ref: _childReplyRef(postId, parentReplyId, replyId),
+      ref: _replyRef(replyId),
       userId: userId,
       isDislike: true,
     );
   }
 
-  // ---------------- REPOST (✅ daha sağlam) ----------------
+  // ---------------- REPOST ----------------
+
   @override
   Future<void> repostPost({
     required String originalPostId,
@@ -400,7 +478,8 @@ class FirestorePostRepository implements PostRepository {
     await batch.commit();
   }
 
-  // ---------------- DÜZENLE ----------------
+  // ---------------- EDIT ----------------
+
   @override
   Future<void> updatePostText({
     required String postId,
@@ -415,7 +494,8 @@ class FirestorePostRepository implements PostRepository {
     });
   }
 
-  // ---------------- SİL ----------------
+  // ---------------- DELETE ----------------
+
   @override
   Future<void> deletePost(String postId) async {
     await _postRef(postId).delete();

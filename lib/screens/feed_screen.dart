@@ -25,11 +25,15 @@ class _FeedScreenState extends State<FeedScreen> {
   final FirestorePostRepository _postRepo = FirestorePostRepository();
   final FirestoreUserRepository _userRepo = FirestoreUserRepository();
 
+  // ✅ Stream cache
+  late final Stream<QuerySnapshot<Map<String, dynamic>>> _feedStream;
+
   User? get _currentUser => FirebaseAuth.instance.currentUser;
 
   @override
   void initState() {
     super.initState();
+    _feedStream = _postRepo.watchFeed();
     _loadUserData();
   }
 
@@ -210,17 +214,13 @@ class _FeedScreenState extends State<FeedScreen> {
         children: [
           Icon(icon, size: 16, color: fg),
           const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(color: fg),
-          ),
+          Text(label, style: TextStyle(color: fg)),
         ],
       ),
       onSelected: (_) => setState(() => _selectedType = value),
     );
   }
 
-  // ✅ REPO
   Future<void> _submitPost() async {
     final text = _postCtrl.text.trim();
     if (text.isEmpty) return;
@@ -257,7 +257,7 @@ class _FeedScreenState extends State<FeedScreen> {
   // ---------- FEED LİSTESİ ----------
   Widget _buildFeedList() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _postRepo.watchFeed(),
+      stream: _feedStream, // ✅ artık sabit
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return const Center(
@@ -370,24 +370,21 @@ class _FeedScreenState extends State<FeedScreen> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         GestureDetector(
-          onTap: () => _openAuthorProfile(authorId, isExpertPost ? 'expert' : 'client'),
+          onTap: () =>
+              _openAuthorProfile(authorId, isExpertPost ? 'expert' : 'client'),
           child: CircleAvatar(
-            child: Text(
-              authorName.isNotEmpty ? authorName[0].toUpperCase() : '?',
-            ),
+            child: Text(authorName.isNotEmpty ? authorName[0].toUpperCase() : '?'),
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: GestureDetector(
-            onTap: () => _openAuthorProfile(authorId, isExpertPost ? 'expert' : 'client'),
+            onTap: () =>
+                _openAuthorProfile(authorId, isExpertPost ? 'expert' : 'client'),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  authorName,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
+                Text(authorName, style: const TextStyle(fontWeight: FontWeight.bold)),
                 Text(
                   isExpertPost ? 'Uzman' : 'Danışan',
                   style: TextStyle(
@@ -513,10 +510,7 @@ class _FeedScreenState extends State<FeedScreen> {
             Icon(icon, size: 18, color: iconColor ?? Colors.grey[700]),
             if (label.isNotEmpty) ...[
               const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(color: Colors.grey[700], fontSize: 12),
-              ),
+              Text(label, style: TextStyle(color: Colors.grey[700], fontSize: 12)),
             ],
           ],
         ),
@@ -653,17 +647,17 @@ class _FeedScreenState extends State<FeedScreen> {
     return Container(
       height: 64,
       decoration: BoxDecoration(
-        color: Colors.deepPurple.shade50,
+        color: Colors.deepPurpleAccent,
         borderRadius: BorderRadius.circular(12),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: const Row(
         children: [
-          Icon(Icons.graphic_eq, color: Colors.deepPurple),
+          Icon(Icons.graphic_eq, color: Colors.white),
           SizedBox(width: 8),
-          Text('Ses kaydı (örnek alan)'),
+          Text('Ses kaydı (örnek alan)', style: TextStyle(color: Colors.white)),
           Spacer(),
-          Icon(Icons.play_arrow),
+          Icon(Icons.play_arrow, color: Colors.white),
         ],
       ),
     );
@@ -721,10 +715,8 @@ class _FeedScreenState extends State<FeedScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Rolün: ${isExpert ? 'Uzman' : 'Danışan'}',
-              style: const TextStyle(fontSize: 16),
-            ),
+            Text('Rolün: ${isExpert ? 'Uzman' : 'Danışan'}',
+                style: const TextStyle(fontSize: 16)),
             const SizedBox(height: 8),
             _buildRoleActions(isExpert),
             const SizedBox(height: 16),
