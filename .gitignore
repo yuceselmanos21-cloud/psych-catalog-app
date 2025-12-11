@@ -46,3 +46,5 @@ app.*.map.json
 lib/analysis_secrets.dart
 node_modules/
 **/node_modules/
+node_modules/
+**/node_modules/
