@@ -1,0 +1,361 @@
+{
+  "indexes": [
+    // 1. PROFİL AKIŞI (User'ın orijinal postları - repost'lar hariç - ESKİ INDEX, artık kullanılmıyor)
+    // Not: Index #17 kullanılıyor (isComment ve deleted filtreleri ile)
+    // Bu index'i kaldırmak yerine bırakıyoruz (geriye dönük uyumluluk için)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "authorId", "order": "ASCENDING" },
+        { "fieldPath": "repostOfPostId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 2. GLOBAL FEED (Yorumlar hariç postlar - ana sorgu - deleted filtresi ile)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 2b. GLOBAL FEED (Alıntılar - feed'de görünmeli)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isQuoteRepost", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 3. REPOST KONTROLÜ (Kullanıcı zaten repost etmiş mi? - yorumlar hariç)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "repostOfPostId", "order": "ASCENDING" },
+        { "fieldPath": "repostedByUserId", "order": "ASCENDING" },
+        { "fieldPath": "isQuoteRepost", "order": "ASCENDING" },
+        { "fieldPath": "isComment", "order": "ASCENDING" }
+      ]
+    },
+
+    // 4. REPOST LİSTESİ (Bir postun tüm repost'ları - deleted filtresi ile)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "repostOfPostId", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+
+    // 5. THREAD (Yorumların zaman sırası)
+    {
+      "collectionGroup": "replies",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parentReplyId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+
+    // 6. POPÜLER YORUMLAR (Engagement sırası - Silinmemişler)
+    {
+      "collectionGroup": "replies",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rootPostId", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "engagement", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+
+    // 7. ARKADAŞ YORUMLARI (Feed Preview için ZORUNLU)
+    {
+      "collectionGroup": "replies",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rootPostId", "order": "ASCENDING" },
+        { "fieldPath": "authorId", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+
+    // 8. TESTLER (Expert Panel & Listeleme)
+    {
+      "collectionGroup": "tests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdBy", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+
+    // 9. ÇÖZÜLEN TESTLER (Kullanıcı Geçmişi)
+    {
+      "collectionGroup": "solvedTests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+
+    // 10. ÇÖZÜLEN TESTLER (Expert İstatistiği)
+    {
+      "collectionGroup": "solvedTests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "testId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+
+    // 11. ŞİKAYETLER (Admin paneli için - open status)
+    {
+      "collectionGroup": "reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 12. UZMAN BAŞVURULARI (Admin paneli için - pending status)
+    {
+      "collectionGroup": "expert_applications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 12b. UZMAN BAŞVURULARI (Alternatif - uid ile)
+    {
+      "collectionGroup": "expert_applications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "uid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 13. NESTED REPLIES (Post detail screen - bir reply'nin alt yorumları)
+    {
+      "collectionGroup": "replies",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parentReplyId", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+
+    // 14. POST COMMENTS (Post detail screen - ana yorumlar - deleted filtresi ile)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rootPostId", "order": "ASCENDING" },
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "parentPostId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 14c. POST COMMENTS (Geçici - deleted ve parentPostId filtresi olmadan, eski yorumlar için)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rootPostId", "order": "ASCENDING" },
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 14d. POST COMMENTS (Geçici - parentPostId ile, deleted filtresi olmadan)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rootPostId", "order": "ASCENDING" },
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "parentPostId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 14b. ALL COMMENTS FOR POST (Stream - tüm yorumlar, deleted filtresi ile)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rootPostId", "order": "ASCENDING" },
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 15. NESTED COMMENTS (Post detail screen - bir yorumun alt yorumları - deleted filtresi ile)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parentPostId", "order": "ASCENDING" },
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+
+    // 15b. NESTED COMMENTS (Geçici - deleted filtresi olmadan, eski yorumlar için)
+    // ⚠️ ÖNEMLİ: Firestore'da equality filtreleri önce, sonra orderBy gelir
+    // Query: where('parentPostId') -> where('isComment') -> orderBy('createdAt')
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parentPostId", "order": "ASCENDING" },
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+
+    // 16. POST PREVIEW COMMENTS (Feed preview - takip edilen kişilerin yorumları - deleted filtresi ile)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "rootPostId", "order": "ASCENDING" },
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "authorId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 17. PROFİL AKIŞI (Yorumlar hariç - isComment ve deleted filtresi ile)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "authorId", "order": "ASCENDING" },
+        { "fieldPath": "repostOfPostId", "order": "ASCENDING" },
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 18. ADMIN PANEL - POSTLAR (Sadece postlar, yorumlar değil - isComment ve createdAt ile)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" },
+        { "fieldPath": "__name__", "order": "DESCENDING" }
+      ]
+    },
+
+    // 19. ADMIN PANEL - YORUMLAR (Sadece yorumlar - isComment ve createdAt ile)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 20. YORUMLAR BY AUTHOR (Profil ekranı - kullanıcının yorumları)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "authorId", "order": "ASCENDING" },
+        { "fieldPath": "isComment", "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 21. LIKED POSTS BY USER (Profil ekranı - beğenilen postlar)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "likedBy", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 22. SAVED POSTS BY USER (Profil ekranı - kaydedilen postlar)
+    {
+      "collectionGroup": "posts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "savedBy", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+
+    // 23. UZMAN ÖNERİLERİ - ŞEHİR İÇİ (Result Detail Screen - optimize edilmiş query)
+    // Query: where('role', isEqualTo: 'expert').where('city', isEqualTo: myCity).limit(20)
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "role", "order": "ASCENDING" },
+        { "fieldPath": "city", "order": "ASCENDING" }
+      ]
+    },
+
+    // 24. UZMAN ÖNERİLERİ - ONLINE DESTEKLEYENLER (Result Detail Screen - optimize edilmiş query)
+    // Query: where('role', isEqualTo: 'expert').where('supportsOnline', isEqualTo: true).limit(15)
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "role", "order": "ASCENDING" },
+        { "fieldPath": "supportsOnline", "order": "ASCENDING" }
+      ]
+    },
+
+    // 25. AI DANIŞMALARI (Kullanıcı Geçmişi)
+    {
+      "collectionGroup": "aiConsultations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+
+    // 15-22. Single field index'ler Firestore tarafından otomatik oluşturulur
+    // Sadece composite index'ler burada tanımlanmalı
+  ],
+  "fieldOverrides": []
+}

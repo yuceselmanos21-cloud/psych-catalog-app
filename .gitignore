@@ -52,3 +52,19 @@ firebase-debug.log
 Thumbs.db
 
 lib/analysis_secrets.dart
+
+# --- Firebase / Google secrets & local state ---
+tools/firebase_admin/serviceAccountKey.json
+serviceAccountKey.json
+**/serviceAccountKey.json
+**/*adminsdk*.json
+
+firebase_options.dart
+lib/firebase_options.dart
+
+google-services.json
+android/app/google-services.json
+
+ios/Runner/GoogleService-Info.plist
+
+.firebase/

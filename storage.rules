@@ -1,0 +1,134 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper: Giriş yapmış mı?
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Helper: Dosya boyutu kontrolü
+    function isSmallFile() {
+      return request.resource.size < 1 * 1024 * 1024; // 1MB
+    }
+
+    function isMediumFile() {
+      return request.resource.size < 10 * 1024 * 1024; // 10MB
+    }
+
+    // Helper: Sadece resim mi?
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    // Helper: Video mu?
+    function isVideo() {
+      return request.resource.contentType.matches('video/.*');
+    }
+
+    // Helper: PDF veya belge mu?
+    function isDocument() {
+      return request.resource.contentType.matches('application/pdf') ||
+             request.resource.contentType.matches('application/msword') ||
+             request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.*');
+    }
+
+    // Her şeye erişimi kapat, sadece özel yollara izin ver.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // --- POST EKLEMLERİ (post_attachments/{userId}/{fileName}) ---
+    match /post_attachments/{userId}/{fileName} {
+      // Okuma: Herkes (giriş yapmış) - postlar herkese açık
+      allow read: if isAuthenticated();
+
+      // Yazma: Sadece sahibi
+      allow write: if isAuthenticated()
+                   && request.auth.uid == userId
+                   && (
+                     // Resim: 1MB altı
+                     (isImage() && isSmallFile()) ||
+                     // Video: 10MB altı
+                     (isVideo() && isMediumFile()) ||
+                     // Belge: 5MB altı
+                     (isDocument() && request.resource.size < 5 * 1024 * 1024)
+                   );
+    }
+
+    // --- AI DANIŞMALARI EKLEMLERİ (ai_consultations/{userId}/{fileName}) ---
+    match /ai_consultations/{userId}/{fileName} {
+      // Okuma: Herkes (giriş yapmış)
+      allow read: if isAuthenticated();
+      
+      // Yazma: Sadece sahibi
+      allow write: if isAuthenticated()
+                   && request.auth.uid == userId
+                   && (
+                     // Resim: 1MB altı
+                     (isImage() && isSmallFile()) ||
+                     // Video: 10MB altı
+                     (isVideo() && isMediumFile()) ||
+                     // Belge: 5MB altı
+                     (isDocument() && request.resource.size < 5 * 1024 * 1024)
+                   );
+    }
+
+    // --- TEST YÜKLEMELERİ (test_uploads/{userId}/{fileName}) ---
+    match /test_uploads/{userId}/{fileName} {
+      // Okuma: Sahibi veya Expert/Admin
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        request.auth.token.role == 'expert' ||
+        request.auth.token.role == 'admin'
+      );
+
+      // Yazma: Sahibi + Küçük Dosya + Resim/Belge
+      allow write: if isAuthenticated()
+                   && request.auth.uid == userId
+                   && (
+                     (isImage() && isSmallFile()) ||
+                     (isDocument() && request.resource.size < 5 * 1024 * 1024)
+                   );
+    }
+
+    // --- PROFİL FOTOĞRAFLARI (profile_photos/{userId}/{fileName}) ---
+    match /profile_photos/{userId}/{fileName} {
+      // Okuma: Herkes (giriş yapmış)
+      allow read: if isAuthenticated();
+
+      // Yazma: Sadece sahibi + Resim + Küçük dosya
+      allow write: if isAuthenticated()
+                   && request.auth.uid == userId
+                   && isImage()
+                   && isSmallFile();
+    }
+
+    // --- KAPAK FOTOĞRAFLARI (cover_photos/{userId}/{fileName}) ---
+    match /cover_photos/{userId}/{fileName} {
+      // Okuma: Herkes (giriş yapmış)
+      allow read: if isAuthenticated();
+
+      // Yazma: Sadece sahibi + Resim + Küçük dosya (kapak fotoğrafları için 2MB'a kadar izin ver)
+      allow write: if isAuthenticated()
+                   && request.auth.uid == userId
+                   && isImage()
+                   && request.resource.size < 2 * 1024 * 1024;
+    }
+
+    // --- CV/DOKÜMANLAR (cv_documents/{userId}/{fileName}) ---
+    match /cv_documents/{userId}/{fileName} {
+      // Okuma: Sadece sahibi ve Admin
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        request.auth.token.role == 'admin'
+      );
+
+      // Yazma: Sadece sahibi + Belge + Orta dosya
+      allow write: if isAuthenticated()
+                   && request.auth.uid == userId
+                   && isDocument()
+                   && request.resource.size < 5 * 1024 * 1024;
+    }
+  }
+}

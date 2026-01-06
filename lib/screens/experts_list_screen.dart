@@ -42,6 +42,7 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
         .where('role', isEqualTo: 'expert');
 
     final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     Widget buildList(Set<String> followingIds) {
       return StreamBuilder<QuerySnapshot>(
@@ -52,7 +53,26 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
           }
 
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Henüz uzman kaydı yok.'));
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.person_outline,
+                    size: 64,
+                    color: isDark ? Colors.grey.shade600 : Colors.grey.shade400,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Henüz uzman kaydı yok',
+                    style: TextStyle(
+                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            );
           }
 
           final allDocs = snapshot.data!.docs;
@@ -64,8 +84,25 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
           }).toList();
 
           if (filtered.isEmpty) {
-            return const Center(
-              child: Text('Aramana uygun uzman bulunamadı.'),
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.search_off,
+                    size: 64,
+                    color: isDark ? Colors.grey.shade600 : Colors.grey.shade400,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Aramana uygun uzman bulunamadı',
+                    style: TextStyle(
+                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
             );
           }
 
@@ -105,70 +142,19 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
 
               final isFollowing = followingIds.contains(expertId);
 
+              final isDark = Theme.of(context).brightness == Brightness.dark;
+              final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+              final borderColor = isDark ? Colors.grey.shade800 : Colors.grey.shade200;
+
               return Card(
-                margin: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                elevation: 0,
+                color: cardBg,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: borderColor, width: 1),
                 ),
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
-                        ? NetworkImage(photoUrl)
-                        : null,
-                    child: (photoUrl == null || photoUrl.isEmpty)
-                        ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?')
-                        : null,
-                  ),
-                  title: Row(
-                    children: [
-                      Expanded(child: Text(name)),
-                      if (isFollowing)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.deepPurple.shade50,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Text(
-                            'Takip ediliyor',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.deepPurple,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(profession, style: const TextStyle(fontSize: 12)),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on,
-                              size: 14, color: Colors.grey),
-                          const SizedBox(width: 4),
-                          Text(city, style: const TextStyle(fontSize: 12)),
-                        ],
-                      ),
-                      if (specialties.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            specialties,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.deepPurple,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
+                child: InkWell(
                   onTap: () {
                     Navigator.pushNamed(
                       context,
@@ -176,6 +162,138 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
                       arguments: expertId,
                     );
                   },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 32,
+                          backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+                              ? NetworkImage(photoUrl)
+                              : null,
+                          backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+                          child: (photoUrl == null || photoUrl.isEmpty)
+                              ? Text(
+                                  name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                  style: TextStyle(
+                                    color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 20,
+                                  ),
+                                )
+                              : null,
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      name,
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                        color: isDark ? Colors.white : Colors.black87,
+                                      ),
+                                    ),
+                                  ),
+                                  if (isFollowing)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: isDark
+                                            ? Colors.deepPurple.shade800
+                                            : Colors.deepPurple.shade50,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        'Takip ediliyor',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isDark
+                                              ? Colors.deepPurple.shade200
+                                              : Colors.deepPurple,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              if (profession.isNotEmpty)
+                                Text(
+                                  profession,
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: isDark ? Colors.deepPurple.shade300 : Colors.deepPurple,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.location_on,
+                                    size: 16,
+                                    color: isDark ? Colors.grey.shade500 : Colors.grey.shade600,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    city,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (specialties.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Wrap(
+                                  spacing: 4,
+                                  runSpacing: 4,
+                                  children: specialties
+                                      .split(',')
+                                      .take(2)
+                                      .map((spec) => Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: isDark
+                                                  ? Colors.deepPurple.shade900.withOpacity(0.3)
+                                                  : Colors.deepPurple.shade50,
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: isDark
+                                                    ? Colors.deepPurple.shade700
+                                                    : Colors.deepPurple.shade200,
+                                                width: 1,
+                                              ),
+                                            ),
+                                            child: Text(
+                                              spec.trim(),
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: isDark
+                                                    ? Colors.deepPurple.shade200
+                                                    : Colors.deepPurple.shade700,
+                                              ),
+                                            ),
+                                          ))
+                                      .toList(),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               );
             },
@@ -187,16 +305,23 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Uzmanları Keşfet'),
+        elevation: 0,
       ),
       body: Column(
         children: [
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
-              decoration: const InputDecoration(
-                labelText: 'Uzman ara (isim, şehir, alan...)',
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: 'Uzman ara (isim, şehir, alan...)',
+                prefixIcon: const Icon(Icons.search),
+                filled: true,
+                fillColor: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               ),
               onChanged: (value) {
                 setState(() {

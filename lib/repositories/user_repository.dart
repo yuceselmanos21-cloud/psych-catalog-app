@@ -7,9 +7,29 @@ abstract class UserRepository {
 
   Future<void> updateUserProfile({
     required String uid,
-    required String city,
-    required String specialties,
-    required String about,
+    String? name,
+    String? username,
+    String? city,
+    String? specialties,
+    String? about,
     String? profession,
+    String? education,
   });
+
+  Future<void> updateHideLikes({
+    required String uid,
+    required bool hideLikes,
+  });
+
+  Future<void> updatePhotoUrl({
+    required String uid,
+    required String photoUrl,
+  });
+
+  Future<void> updateCoverPhotoUrl({
+    required String uid,
+    required String coverPhotoUrl,
+  });
+
+  Future<bool> isAdmin(String uid);
 }

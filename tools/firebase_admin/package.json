@@ -1,0 +1,15 @@
+{
+  "name": "firebase-admin-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "wipe": "node ./wipe_all.js --firestore --auth",
+    "wipe:firestore": "node ./wipe_all.js --firestore",
+    "wipe:auth": "node ./wipe_all.js --auth"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}
+

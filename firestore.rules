@@ -1,0 +1,397 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- YARDIMCI FONKSİYONLAR ---
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // ✅ UZMAN KONTROLÜ: Hem token'dan hem de users koleksiyonundan kontrol et
+    function isExpert() {
+      // Önce token'dan kontrol et (daha hızlı, maliyet yok)
+      return request.auth.token.role == 'expert' || 
+             // Token'da yoksa users koleksiyonundan kontrol et
+             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'expert');
+    }
+
+    function isAdmin() {
+      // Önce token'dan kontrol et (daha hızlı, maliyet yok)
+      return request.auth.token.role == 'admin' ||
+             // Token'da yoksa users koleksiyonundan kontrol et
+             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+
+    // ✅ UZMAN/ADMİN KONTROLÜ: Tüm yolları kontrol et
+    function isExpertOrAdmin() {
+      // Token'dan kontrol (en hızlı, maliyet yok)
+      return request.auth.token.role == 'expert' || 
+             request.auth.token.role == 'admin' ||
+             // Admin koleksiyonundan kontrol
+             isAdminInCollection() ||
+             // Users koleksiyonundan kontrol
+             (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+              (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'expert' ||
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+
+    // Admin koleksiyonunda var mı kontrol et (güvenlik için)
+    function isAdminInCollection() {
+      return exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ✅ Array içinde UID kontrolü (participants array'i için)
+    // Not: Firestore rules'da 'in' operatörü array'ler için kullanılamaz
+    // Bu yüzden her elemanı kontrol ediyoruz (genellikle 2 eleman var)
+    function isParticipant(participants) {
+      return participants != null && 
+             participants is list && 
+             participants.size() > 0 &&
+             participants.size() <= 2 &&
+             (participants[0] == request.auth.uid || 
+              (participants.size() > 1 && participants[1] == request.auth.uid));
+    }
+
+    // Post doğrulama (Basit spam koruması)
+    // ✅ GÜVENLİK: Repost, quote ve yorum post'ları da kabul et
+    function isValidPost() {
+      let data = request.resource.data;
+      let isComment = data.isComment == true;
+      let isRepost = data.repostOfPostId is string && data.repostOfPostId.size() > 0;
+      
+      // ✅ Yorum kontrolü: rootPostId olmalı, isComment == true
+      let commentValid = isComment &&
+                         data.rootPostId is string &&
+                         data.rootPostId.size() > 0 &&
+                         data.authorId is string &&
+                         data.authorId == request.auth.uid &&
+                         (data.content is string || data.mediaUrl is string) &&
+                         (data.content.size() < 500 || data.content.size() == 0) && // Yorumlar 500 karakterden kısa
+                         (data.deleted == false || !('deleted' in data)); // ✅ Silinmiş yorum oluşturulamaz
+      
+      // Repost/Quote kontrolü: repostOfPostId varsa repost validasyonu
+      // Repost/Quote: repostedByUserId repost eden kişinin ID'si olmalı
+      // authorId ise orijinal postun authorId'si (repost eden kişinin değil)
+      let repostValid = !isComment && isRepost &&
+                        data.repostedByUserId is string &&
+                        data.repostedByUserId == request.auth.uid &&
+                        data.authorId is string && // Orijinal postun authorId'si
+                        (data.deleted == false || !('deleted' in data)); // ✅ Silinmiş repost/quote oluşturulamaz
+      
+      // Normal post: content olmalı, yorum değil
+      let normalPostValid = !isComment && !isRepost &&
+                            data.content is string && 
+                            data.content.size() > 0 && 
+                            data.content.size() < 1000 &&
+                            data.authorId is string &&
+                            data.authorId == request.auth.uid &&
+                            (data.deleted == false || !('deleted' in data)); // ✅ Silinmiş post oluşturulamaz
+      
+      return commentValid || repostValid || normalPostValid;
+    }
+
+    // --- KOLEKSİYON KURALLARI ---
+
+    // 1. KULLANICILAR
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      // ✅ KAYIT/GİRİŞ: Kullanıcı kendi UID'si ile oluşturabilir (auth flow)
+      allow create: if isAuthenticated() && isOwner(userId);
+      // Yazma: Sadece kendi profili veya Admin
+      // ✅ GÜVENLİK: Kritik alanlar (role, email) korunmalı
+      allow update: if isAuthenticated() && (
+        // Senaryo 1: Kullanıcı kendi profilini güncelliyor - sadece profil alanları değişebilir
+        (isOwner(userId) &&
+         // Kritik alanlar değişemez (uid zaten document ID'si, kontrol gereksiz)
+         request.resource.data.role == resource.data.role &&
+         (!('email' in resource.data) || request.resource.data.email == resource.data.email)) ||
+        // Senaryo 2: Admin herhangi bir kullanıcıyı güncelleyebilir
+        isAdminInCollection() || 
+        request.auth.token.role == 'admin'
+      );
+      allow delete: if isAdminInCollection() || request.auth.token.role == 'admin'; // Sadece admin silebilir
+    }
+
+    // 1b. USERNAMES (Kullanıcı adı mapping - kayıt/giriş için gerekli)
+    match /usernames/{usernameLower} {
+      // ✅ GİRİŞ: Username'den email çözümleme için public read (sadece email var, hassas değil)
+      allow read: if true; // Herkese açık (giriş için gerekli, sadece email bilgisi var)
+      // ✅ KAYIT: Kullanıcı kendi username'ini oluşturabilir (auth flow)
+      allow create: if isAuthenticated() && 
+                    request.resource.data.uid == request.auth.uid;
+      allow update: if false; // Username değiştirilemez
+      allow delete: if isAdminInCollection() || request.auth.token.role == 'admin';
+    }
+
+    // 2. POSTLAR
+    match /posts/{postId} {
+      // Okuma: Herkes (giriş yapmış)
+      allow read: if isAuthenticated();
+
+      // Oluşturma: Sadece Expert/Admin ve kendi adına
+      // Admin kontrolü: token'da role='admin' VEYA admins koleksiyonunda var
+      allow create: if isExpertOrAdmin()
+                    && isValidPost()
+                    && request.resource.data.authorId == request.auth.uid;
+
+      // Güncelleme: Çoklu senaryo
+      // ✅ GÜVENLİK: Sadece belirli alanlar güncellenebilir
+      allow update: if isAuthenticated() && (
+        // Senaryo 1: Expert/Admin kendi postunu/yorumunu düzenliyor
+        // ✅ GÜVENLİK: Sadece içerik alanları değişebilir (content, mediaUrl, mediaType, editedAt)
+        (isExpertOrAdmin() && isOwner(resource.data.authorId) &&
+         request.resource.data.content is string &&
+         request.resource.data.authorId == resource.data.authorId &&
+         request.resource.data.isComment == resource.data.isComment) || // isComment değişemez
+        
+        // Senaryo 2: Bookmark (Herkes) - sadece savedBy array'i değişebilir
+        // ✅ GÜVENLİK: savedBy array'i değişebilir, diğer kritik alanlar aynı kalmalı
+        (request.resource.data.savedBy is list &&
+         request.resource.data.authorId == resource.data.authorId &&
+         request.resource.data.content == resource.data.content &&
+         request.resource.data.isComment == resource.data.isComment) ||
+        
+        // Senaryo 3: Like (Herkes) - sadece likedBy array'i ve stats.likeCount değişebilir
+        // ✅ GÜVENLİK: likedBy ve stats.likeCount değişebilir, diğer kritik alanlar aynı kalmalı
+        (request.resource.data.likedBy is list &&
+         request.resource.data.stats.likeCount is int &&
+         request.resource.data.authorId == resource.data.authorId &&
+         request.resource.data.content == resource.data.content &&
+         request.resource.data.isComment == resource.data.isComment) ||
+        
+        // Senaryo 4: Stats güncellemesi (repost/quote/reply sayıları)
+        // ✅ GÜVENLİK: Stats güncellemesi - sadece stats alanı değişebilir, diğer alanlar aynı kalmalı
+        // Not: Bu genellikle backend (Cloud Functions) tarafından yapılır, ama client-side da yapılabilir
+        (request.resource.data.stats is map &&
+         request.resource.data.authorId == resource.data.authorId &&
+         request.resource.data.content == resource.data.content &&
+         request.resource.data.likedBy == resource.data.likedBy &&
+         request.resource.data.savedBy == resource.data.savedBy &&
+         request.resource.data.isComment == resource.data.isComment) ||
+        
+        // Senaryo 5: Soft delete (sadece post sahibi veya admin)
+        // ✅ GÜVENLİK: deleted ve deletedAt alanları değişebilir, diğer kritik alanlar aynı kalmalı
+        (request.resource.data.deleted is bool &&
+         request.resource.data.authorId == resource.data.authorId &&
+         request.resource.data.content == resource.data.content &&
+         request.resource.data.isComment == resource.data.isComment &&
+         (isOwner(resource.data.authorId) || isAdminInCollection() || request.auth.token.role == 'admin'))
+      );
+
+      // Silme: Sadece Expert/Admin ve kendi postu veya Admin herhangi bir postu
+      allow delete: if isAuthenticated() && (
+        (isExpertOrAdmin() && isOwner(resource.data.authorId)) ||
+        isAdminInCollection() ||
+        request.auth.token.role == 'admin'
+      );
+    }
+
+    // 3. YORUMLAR (Sadece Expert/Admin yazabilir)
+    match /replies/{replyId} {
+      allow read: if isAuthenticated();
+
+      // Oluşturma: Sadece Expert/Admin ve kendi adına
+      // ✅ GÜVENLİK: text veya content field'ı kabul et (repository'de text kullanılıyor)
+      // ✅ GÜVENLİK: Media varsa text boş olabilir
+      allow create: if isExpertOrAdmin()
+                    && request.resource.data.authorId == request.auth.uid
+                    && (
+                      // Text var ve geçerli
+                      (request.resource.data.text is string && 
+                       request.resource.data.text.size() > 0 && 
+                       request.resource.data.text.size() < 500) ||
+                      // Veya content var ve geçerli
+                      (request.resource.data.content is string && 
+                       request.resource.data.content.size() > 0 && 
+                       request.resource.data.content.size() < 500) ||
+                      // Veya media var (text boş olabilir)
+                      (request.resource.data.mediaUrl is string && 
+                       request.resource.data.mediaUrl.size() > 0)
+                    );
+
+      // Güncelleme: Çoklu senaryo
+      allow update: if isAuthenticated() && (
+        // Senaryo 1: Sahibi veya Expert/Admin düzenliyor
+        (isOwner(resource.data.authorId) || isExpertOrAdmin() || isAdminInCollection() || request.auth.token.role == 'admin') ||
+        
+        // Senaryo 2: Like (Herkes) - sadece likedBy array'i ve likeCount değişebilir
+        (request.resource.data.likedBy is list &&
+         request.resource.data.likeCount is int &&
+         request.resource.data.authorId == resource.data.authorId &&
+         request.resource.data.text == resource.data.text &&
+         request.resource.data.content == resource.data.content) ||
+        
+        // Senaryo 3: Reply count güncellemesi (nested replies için)
+        (request.resource.data.replyCount is int &&
+         request.resource.data.authorId == resource.data.authorId &&
+         request.resource.data.text == resource.data.text &&
+         request.resource.data.content == resource.data.content &&
+         request.resource.data.likedBy == resource.data.likedBy)
+      );
+      
+      // Silme: Sadece sahibi veya Expert/Admin veya Admin
+      allow delete: if isAuthenticated()
+                    && (isOwner(resource.data.authorId) || isExpertOrAdmin() || isAdminInCollection() || request.auth.token.role == 'admin');
+    }
+
+    // 4. ŞİKAYETLER (Herkes şikayet edebilir, sadece Admin görebilir)
+    match /reports/{reportId} {
+      allow read: if isAdminInCollection() || isAdmin();
+      
+      // Oluşturma: Herkes kendi adına şikayet edebilir
+      allow create: if isAuthenticated()
+                    && request.resource.data.createdBy == request.auth.uid
+                    && request.resource.data.targetType is string
+                    && request.resource.data.targetId is string
+                    && request.resource.data.reason is string
+                    && request.resource.data.reason.size() > 0
+                    && request.resource.data.reason.size() < 500;
+      
+      // Güncelleme: Sadece Admin (status değişikliği, adminNote ekleme)
+      allow update: if isAdminInCollection() || isAdmin();
+      
+      allow delete: if false; // Şikayetler silinemez, sadece kapatılabilir
+    }
+
+    // 5. TEST TANIMLARI (Sadece Expert/Admin Yönetir, Admin her şeyi yapabilir)
+    match /tests/{testId} {
+      allow read: if isAuthenticated();
+      allow create: if isExpertOrAdmin() || isAdminInCollection() || request.auth.token.role == 'admin';
+      allow update: if isExpertOrAdmin() || isAdminInCollection() || request.auth.token.role == 'admin';
+      allow delete: if isExpertOrAdmin() || isAdminInCollection() || request.auth.token.role == 'admin';
+    }
+
+    // 6. ÇÖZÜLEN TESTLER (EN KRİTİK GÜVENLİK ALANI)
+    match /solvedTests/{docId} {
+      // Okuma: Sadece testi çözen kişi veya Expert/Admin görebilir
+      allow read: if isAuthenticated() 
+                    && (isOwner(resource.data.userId) || isExpertOrAdmin());
+
+      // Oluşturma:
+      // 1. Kendi userId'si ile atmalı.
+      // 2. Status 'pending' olmalı (Hile koruması).
+      // 3. aiAnalysis alanı boş veya null olmalı (Sonucu elle yazamaz).
+      allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.status == 'pending'
+                    && (!('aiAnalysis' in request.resource.data) || request.resource.data.aiAnalysis == null);
+
+      // Güncelleme: ASLA İZİN YOK.
+      // Kullanıcı cevabı değiştiremez, sonucu yazamaz.
+      // Sadece Cloud Function (Admin SDK) bypass edip yazar.
+      allow update: if false;
+    }
+
+    // 7. AI DANIŞMALARI (Kullanıcıların AI analiz danışmaları)
+    match /aiConsultations/{consultationId} {
+      // Okuma: Sadece kendi danışmalarını görebilir
+      allow read: if isAuthenticated() 
+                    && isOwner(resource.data.userId);
+      
+      // Oluşturma: Backend'den oluşturuluyor (Admin SDK bypass eder), ama kullanıcı da oluşturabilir (kendi userId'si ile)
+      // Not: text boş olabilir (sadece eklenti varsa), analysis zorunlu
+      allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid
+                    && (request.resource.data.text is string || !('text' in request.resource.data))
+                    && request.resource.data.analysis is string
+                    && request.resource.data.analysis.size() > 0;
+      
+      // Güncelleme: Genellikle gerekmez, ama backend güncelleyebilir (şimdilik sadece sahibi)
+      allow update: if isAuthenticated()
+                    && isOwner(resource.data.userId);
+      
+      // Silme: Sadece sahibi silebilir
+      allow delete: if isAuthenticated()
+                    && isOwner(resource.data.userId);
+    }
+
+    // 8. UZMAN BAŞVURULARI (Admin onayı için)
+    match /expert_applications/{applicationId} {
+      allow read: if isAdminInCollection() || isAdmin();
+      allow create: if isAuthenticated()
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.status == 'pending';
+      allow update: if isAdminInCollection() || isAdmin();
+      allow delete: if isAdminInCollection() || isAdmin();
+    }
+
+    // 9. ADMİN KOLEKSİYONU (Çok sıkı güvenlik)
+    match /admins/{adminId} {
+      // Okuma: Kullanıcı kendi UID'sini kontrol edebilir (admin kontrolü için)
+      // VEYA zaten admin ise (token'dan veya koleksiyondan)
+      allow read: if isAuthenticated() && (
+        adminId == request.auth.uid || // Kendi UID'sini kontrol edebilir
+        isAdminInCollection() || // Zaten admin ise
+        request.auth.token.role == 'admin' // Token'da admin rolü varsa
+      );
+      
+      // Yazma: Sadece mevcut Admin'ler (yeni admin ekleme)
+      // Not: İlk admin manuel olarak Firebase Console'dan eklenmeli
+      allow write: if isAdminInCollection() || request.auth.token.role == 'admin';
+    }
+
+    // 10. TAKİP SİSTEMİ
+    match /users/{userId}/following/{followingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isOwner(userId);
+    }
+
+    // 10b. TAKİPÇİLER SİSTEMİ (users/{targetId}/followers/{followerId})
+    match /users/{targetId}/followers/{followerId} {
+      allow read: if isAuthenticated();
+      // ✅ Güvenlik: Sadece takip eden kişi (followerId) kendi kaydını oluşturabilir/silebilir
+      allow write: if isAuthenticated() && isOwner(followerId);
+    }
+
+    // 11. BOOKMARK SİSTEMİ (users/{userId}/bookmarks/{postId})
+    match /users/{userId}/bookmarks/{postId} {
+      allow read: if isAuthenticated() && isOwner(userId);
+      allow write: if isAuthenticated() && isOwner(userId);
+    }
+
+    // 12. MESAJLAŞMA SİSTEMİ
+    match /chats/{chatId} {
+      // ✅ Okuma: Sadece katılımcılar okuyabilir
+      allow read: if isAuthenticated() && 
+                   isParticipant(resource.data.participants);
+      
+      // ✅ Oluşturma: Her iki kullanıcı da chat'i oluşturabilir (participants içinde olmalı)
+      allow create: if isAuthenticated() &&
+                     isParticipant(request.resource.data.participants);
+      
+      // ✅ Güncelleme: Sadece katılımcılar güncelleyebilir (lastMessage, lastMessageAt gibi)
+      allow update: if isAuthenticated() &&
+                     isParticipant(resource.data.participants) &&
+                     isParticipant(request.resource.data.participants);
+      
+      // ✅ Silme: Sadece katılımcılar silebilir
+      allow delete: if isAuthenticated() &&
+                     isParticipant(resource.data.participants);
+
+      // MESAJLAR (chats/{chatId}/messages/{messageId})
+      match /messages/{messageId} {
+        // ✅ Okuma: Sadece chat'in katılımcıları okuyabilir
+        allow read: if isAuthenticated() &&
+                     isParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
+        
+        // ✅ Oluşturma: Sadece chat'in katılımcıları mesaj gönderebilir
+        allow create: if isAuthenticated() &&
+                       isParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data.participants) &&
+                       request.resource.data.senderId == request.auth.uid;
+        
+        // ✅ Güncelleme: Mesajlar güncellenemez (immutable)
+        allow update: if false;
+        
+        // ✅ Silme: Sadece mesaj göndereni silebilir
+        allow delete: if isAuthenticated() &&
+                       request.auth.uid == resource.data.senderId;
+      }
+    }
+  }
+}

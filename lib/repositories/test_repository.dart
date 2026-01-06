@@ -10,8 +10,8 @@ abstract class TestRepository {
     required String title,
     required String description,
     required String createdBy,
-    required List<String> questions,
-    required String answerType, // 'scale' | 'text'
+    required dynamic questions, // ✅ List<String> (eski) veya List<Map<String, dynamic>> (yeni)
+    required String answerType, // 'scale' | 'text' | 'multiple_choice' (geriye dönük uyumluluk için)
     String? expertName,
   });
 

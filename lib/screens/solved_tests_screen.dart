@@ -77,48 +77,104 @@ class SolvedTestsScreen extends StatelessWidget {
               final aiText = d['aiAnalysis']?.toString() ?? '';
               final hasAi = aiText.trim().isNotEmpty;
 
+              final isDark = Theme.of(context).brightness == Brightness.dark;
+              final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+              final borderColor = isDark ? Colors.grey.shade800 : Colors.grey.shade200;
+
               return Card(
-                margin:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: ListTile(
-                  title: Text(safeTitle),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (solvedAt != null)
-                        Text(
-                          'Çözüldü: ${_formatDateTime(solvedAt)}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      const SizedBox(height: 2),
-                      Text(
-                        hasAi ? 'AI yorumu kayıtlı' : 'AI yorumu bulunmuyor',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: hasAi ? Colors.green : Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                elevation: 0,
+                color: cardBg,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: borderColor, width: 1),
+                ),
+                child: InkWell(
                   onTap: () {
                     Navigator.pushNamed(
                       context,
                       '/resultDetail',
                       arguments: {
                         'testTitle': safeTitle,
-                        'answers':
-                        List<dynamic>.from(d['answers'] ?? const []),
-                        'questions':
-                        List<dynamic>.from(d['questions'] ?? const []),
+                        'answers': List<dynamic>.from(d['answers'] ?? const []),
+                        'questions': List<dynamic>.from(d['questions'] ?? const []),
                         'createdAt': ts,
                         'aiAnalysis': aiText,
+                        'testId': d['testId']?.toString(), // Testi oluşturan uzmanı bulmak için
                       },
                     );
                   },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                safeTitle,
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                            ),
+                            Icon(
+                              Icons.arrow_forward_ios,
+                              size: 16,
+                              color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        if (solvedAt != null) ...[
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.access_time,
+                                size: 16,
+                                color: isDark ? Colors.grey.shade500 : Colors.grey.shade600,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Çözüldü: ${_formatDateTime(solvedAt)}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        Row(
+                          children: [
+                            Icon(
+                              hasAi ? Icons.check_circle : Icons.info_outline,
+                              size: 16,
+                              color: hasAi
+                                  ? (isDark ? Colors.green.shade300 : Colors.green)
+                                  : (isDark ? Colors.grey.shade500 : Colors.grey.shade600),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              hasAi ? 'AI yorumu kayıtlı' : 'AI yorumu bulunmuyor',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: hasAi
+                                    ? (isDark ? Colors.green.shade300 : Colors.green.shade700)
+                                    : (isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+                                fontWeight: hasAi ? FontWeight.w500 : FontWeight.normal,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               );
             },
