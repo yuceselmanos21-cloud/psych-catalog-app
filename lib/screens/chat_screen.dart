@@ -192,7 +192,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.otherUserName ?? "Sohbet"),
+        title: Text(
+          widget.otherUserName ?? "Sohbet",
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+        ),
         elevation: 0,
       ),
       body: Column(

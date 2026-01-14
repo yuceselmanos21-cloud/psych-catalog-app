@@ -680,6 +680,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   // -------------------- UI building blocks --------------------
 
   Widget _sectionHeader(String title, {String? subtitle}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
       child: Column(
@@ -688,7 +689,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
           if (subtitle != null) ...[
             const SizedBox(height: 2),
-            Text(subtitle, style: TextStyle(color: Colors.grey.shade700, fontSize: 12)),
+            Text(subtitle, style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade700, fontSize: 12)),
           ],
         ],
       ),
@@ -696,23 +697,29 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _pill(String text, {Color? bg, Color? fg}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: bg ?? Colors.black.withOpacity(0.05),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: fg ?? Colors.black87)),
+      child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: fg ?? (isDark ? Colors.white : Colors.black87))),
     );
   }
 
   Widget _buildNotAllowed() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(title: const Text('Admin Panel')),
-      body: const Center(
+      body: Center(
         child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Text('Bu sayfaya erişim iznin yok.', textAlign: TextAlign.center),
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            'Bu sayfaya erişim iznin yok.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+          ),
         ),
       ),
     );
@@ -720,15 +727,19 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (_checking && !_isAdmin) {
-      return const Scaffold(
+      return Scaffold(
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Admin kontrolü yapılıyor...'),
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(
+                'Admin kontrolü yapılıyor...',
+                style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+              ),
             ],
           ),
         ),
@@ -875,7 +886,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                       const SizedBox(height: 2),
                                       Text(
                                         'uid: $uid',
-                                        style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+                                        style: TextStyle(color: isDark ? Colors.grey.shade500 : Colors.grey.shade600, fontSize: 11),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                       ),
@@ -897,7 +908,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                           : Colors.black.withOpacity(0.05)),
                                       fg: role == 'expert'
                                           ? Colors.deepPurple
-                                          : (role == 'admin' ? Colors.blue : Colors.black87),
+                                          : (role == 'admin' ? Colors.blue : (isDark ? Colors.white : Colors.black87)),
                                     ),
                                     const SizedBox(height: 6),
                                     _pill(

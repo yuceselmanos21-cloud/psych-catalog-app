@@ -384,6 +384,7 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (_roleLoading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Test Oluştur')),
@@ -394,12 +395,13 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
     if (!_isExpert && !_isAdmin) {
       return Scaffold(
         appBar: AppBar(title: const Text('Test Oluştur')),
-        body: const Center(
+        body: Center(
           child: Padding(
-            padding: EdgeInsets.all(16),
+            padding: const EdgeInsets.all(16),
             child: Text(
               'Bu sayfa sadece uzmanlara açıktır.',
               textAlign: TextAlign.center,
+              style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
             ),
           ),
         ),
@@ -774,6 +776,7 @@ class _QuestionCardState extends State<_QuestionCard> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
@@ -801,7 +804,7 @@ class _QuestionCardState extends State<_QuestionCard> {
                         _getTypeLabel(_selectedType),
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.grey.shade600,
+                          color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -830,9 +833,9 @@ class _QuestionCardState extends State<_QuestionCard> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.grey.shade50,
+                color: isDark ? Colors.grey.shade800 : Colors.grey.shade50,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade300),
+                border: Border.all(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -849,7 +852,7 @@ class _QuestionCardState extends State<_QuestionCard> {
                     _getTypeDescription(_selectedType),
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.grey.shade600,
+                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
                     ),
                   ),
                 ],
@@ -1046,7 +1049,7 @@ class _QuestionCardState extends State<_QuestionCard> {
                           if (loadingProgress == null) return child;
                           return Container(
                             height: 200,
-                            color: Colors.grey.shade200,
+                            color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
                             child: Center(
                               child: CircularProgressIndicator(
                                 value: loadingProgress.expectedTotalBytes != null
@@ -1061,17 +1064,17 @@ class _QuestionCardState extends State<_QuestionCard> {
                             height: 200,
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Colors.grey.shade200,
+                              color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.broken_image, size: 48, color: Colors.grey.shade600),
+                                Icon(Icons.broken_image, size: 48, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                                 const SizedBox(height: 8),
                                 Text(
                                   'Görsel yüklenemedi',
-                                  style: TextStyle(color: Colors.grey.shade600),
+                                  style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                                 ),
                               ],
                             ),
@@ -1094,7 +1097,7 @@ class _QuestionCardState extends State<_QuestionCard> {
                               shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.2),
+                                  color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.2),
                                   blurRadius: 4,
                                   offset: const Offset(0, 2),
                                 ),

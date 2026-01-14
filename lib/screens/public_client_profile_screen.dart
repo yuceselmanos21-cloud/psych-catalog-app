@@ -84,7 +84,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
   // ---------- UI/UX HELPER METODLAR ----------
   
   /// ✅ Profesyonel loading state
-  Widget _buildLoadingState({String? message}) {
+  Widget _buildLoadingState({String? message, bool? isDark}) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -117,7 +117,9 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
     required String title,
     String? subtitle,
     Color? iconColor,
+    bool? isDark,
   }) {
+    final dark = isDark ?? Theme.of(context).brightness == Brightness.dark;
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 64),
@@ -127,7 +129,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
             Icon(
               icon,
               size: 64,
-              color: iconColor ?? Colors.grey.shade400,
+              color: iconColor ?? (dark ? Colors.grey.shade600 : Colors.grey.shade400),
             ),
             const SizedBox(height: 16),
             Text(
@@ -135,7 +137,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
-                color: Colors.grey.shade700,
+                color: dark ? Colors.grey.shade300 : Colors.grey.shade700,
               ),
               textAlign: TextAlign.center,
             ),
@@ -145,7 +147,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                 subtitle,
                 style: TextStyle(
                   fontSize: 14,
-                  color: Colors.grey.shade500,
+                  color: dark ? Colors.grey.shade500 : Colors.grey.shade500,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -160,7 +162,9 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
   Widget _buildErrorState({
     required String message,
     VoidCallback? onRetry,
+    bool? isDark,
   }) {
+    final dark = isDark ?? Theme.of(context).brightness == Brightness.dark;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -177,7 +181,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
               message,
               style: TextStyle(
                 fontSize: 16,
-                color: Colors.grey.shade700,
+                color: dark ? Colors.grey.shade300 : Colors.grey.shade700,
               ),
               textAlign: TextAlign.center,
             ),
@@ -244,6 +248,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
     String photoUrl,
     String? currentUserId,
     bool canFollow,
+    bool isDark,
   ) {
     final coverUrl = data['coverUrl']?.toString();
     final city = data['city']?.toString() ?? 'Belirtilmemiş';
@@ -256,7 +261,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
           height: 180,
           width: double.infinity,
           decoration: BoxDecoration(
-            color: Colors.grey.shade200,
+            color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
             image: coverUrl != null && coverUrl.isNotEmpty
                 ? DecorationImage(
                     image: NetworkImage(coverUrl),
@@ -277,7 +282,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
         
         // ✅ Profil bilgileri (kapak fotoğrafının altında)
         Container(
-          color: Colors.white,
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           padding: const EdgeInsets.all(16),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -292,13 +297,13 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                     height: 80,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white,
-                      border: Border.all(color: Colors.grey.shade300, width: 2),
+                      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                      border: Border.all(color: isDark ? Colors.grey.shade700 : Colors.grey.shade300, width: 2),
                     ),
                     child: CircleAvatar(
                       radius: 38,
                       backgroundImage: photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
-                      backgroundColor: Colors.grey.shade200,
+                      backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
                       child: photoUrl.isEmpty
                           ? Text(
                               name.isNotEmpty ? name[0].toUpperCase() : '?',
@@ -347,10 +352,10 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                         children: [
                           Text(
                             name,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
-                              color: Colors.black87,
+                              color: isDark ? Colors.white : Colors.black87,
                             ),
                           ),
                           if (username.trim().isNotEmpty) ...[
@@ -515,6 +520,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
   }
 
   Widget _buildPostsTab() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _postRepo.watchUserPostsAndReposts(widget.clientId, limit: 30),
       builder: (context, snap) {
@@ -522,11 +528,12 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
           return _buildErrorState(
             message: 'Paylaşımlar yüklenirken hata oluştu.',
             onRetry: () => setState(() {}),
+            isDark: isDark,
           );
         }
 
         if (snap.connectionState == ConnectionState.waiting) {
-          return _buildLoadingState(message: 'Paylaşımlar yükleniyor...');
+          return _buildLoadingState(message: 'Paylaşımlar yükleniyor...', isDark: isDark);
         }
 
         final allDocs = snap.data?.docs ?? const [];
@@ -564,6 +571,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
             title: 'Henüz paylaşım yok',
             subtitle: 'Bu kullanıcı henüz paylaşım yapmamış',
             iconColor: Colors.deepPurple.shade300,
+            isDark: isDark,
           );
         }
 
@@ -590,6 +598,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
   }
 
   Widget _buildCommentsTab() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: _postRepo.watchCommentsByAuthor(widget.clientId, limit: 50),
       builder: (context, snap) {
@@ -601,7 +610,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
         }
 
         if (snap.connectionState == ConnectionState.waiting) {
-          return _buildLoadingState(message: 'Yorumlar yükleniyor...');
+          return _buildLoadingState(message: 'Yorumlar yükleniyor...', isDark: isDark);
         }
 
         final docs = snap.data?.docs ?? const [];
@@ -611,6 +620,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
             title: 'Henüz yorum yok',
             subtitle: 'Bu kullanıcı henüz yorum yapmamış',
             iconColor: Colors.orange.shade300,
+            isDark: isDark,
           );
         }
 
@@ -637,6 +647,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
   }
 
   Widget _buildLikedPostsTab() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _userRepo.watchUser(widget.clientId),
       builder: (context, userSnap) {
@@ -653,11 +664,11 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.visibility_off, size: 48, color: Colors.grey.shade400),
+                  Icon(Icons.visibility_off, size: 48, color: isDark ? Colors.grey.shade600 : Colors.grey.shade400),
                   const SizedBox(height: 16),
                   Text(
                     'Bu kullanıcı beğenilerini gizliyor.',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+                    style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontSize: 16),
                   ),
                 ],
               ),
@@ -672,11 +683,12 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
               return _buildErrorState(
                 message: 'Beğeniler yüklenirken hata oluştu.',
                 onRetry: () => setState(() {}),
+                isDark: isDark,
               );
             }
 
             if (snap.connectionState == ConnectionState.waiting) {
-              return _buildLoadingState(message: 'Beğeniler yükleniyor...');
+              return _buildLoadingState(message: 'Beğeniler yükleniyor...', isDark: isDark);
             }
 
             final docs = snap.data?.docs ?? const [];
@@ -686,6 +698,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                 title: 'Henüz beğeni yok',
                 subtitle: 'Bu kullanıcının beğenileri gizli veya henüz beğenisi yok',
                 iconColor: Colors.pink.shade300,
+                isDark: isDark,
               );
             }
 
@@ -713,7 +726,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
     );
   }
 
-  Widget _buildAboutTab(String education, String? cvUrl) {
+  Widget _buildAboutTab(String education, String? cvUrl, bool isDark) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -733,12 +746,12 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                       children: [
                         Icon(Icons.school_outlined, size: 20, color: Colors.green.shade700),
                         const SizedBox(width: 8),
-                        const Text(
+                        Text(
                           'Eğitim ve Sertifikalar',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
-                            color: Colors.black87,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                       ],
@@ -748,7 +761,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                       education,
                       style: TextStyle(
                         fontSize: 14,
-                        color: Colors.grey.shade700,
+                        color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
                         height: 1.6,
                       ),
                     ),
@@ -777,7 +790,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: Colors.red.shade50,
+                              color: isDark ? Colors.red.shade900.withOpacity(0.3) : Colors.red.shade50,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Icon(Icons.picture_as_pdf, size: 28, color: Colors.red.shade700),
@@ -787,12 +800,12 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   'CV',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 16,
-                                    color: Colors.black87,
+                                    color: isDark ? Colors.white : Colors.black87,
                                   ),
                                 ),
                                 const SizedBox(height: 4),
@@ -800,13 +813,13 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                                   'CV belgesini görüntülemek için tıklayın',
                                   style: TextStyle(
                                     fontSize: 13,
-                                    color: Colors.grey.shade600,
+                                    color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          Icon(Icons.chevron_right, color: Colors.grey.shade400, size: 24),
+                          Icon(Icons.chevron_right, color: isDark ? Colors.grey.shade600 : Colors.grey.shade400, size: 24),
                         ],
                       ),
                     ),
@@ -818,22 +831,22 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: Colors.grey.shade100,
+                            color: isDark ? Colors.grey.shade800 : Colors.grey.shade100,
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Icon(Icons.picture_as_pdf, size: 28, color: Colors.grey.shade400),
+                          child: Icon(Icons.picture_as_pdf, size: 28, color: isDark ? Colors.grey.shade600 : Colors.grey.shade400),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'CV',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
-                                  color: Colors.black87,
+                                  color: isDark ? Colors.white : Colors.black87,
                                 ),
                               ),
                               const SizedBox(height: 4),
@@ -841,7 +854,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                                 'CV eklenmedi',
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: Colors.grey.shade500,
+                                  color: isDark ? Colors.grey.shade500 : Colors.grey.shade500,
                                   fontStyle: FontStyle.italic,
                                 ),
                               ),
@@ -876,6 +889,8 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         stream: _userRepo.watchUser(widget.clientId),
         builder: (context, snap) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -892,7 +907,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                     Text(
                       'Profil yüklenirken hata oluştu.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey.shade700),
+                      style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
                     ),
                     const SizedBox(height: 16),
                     ElevatedButton(
@@ -906,8 +921,11 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
           }
 
           if (!snap.hasData || !snap.data!.exists) {
-            return const Center(
-              child: Text('Kullanıcı bulunamadı.'),
+            return Center(
+              child: Text(
+                'Kullanıcı bulunamadı.',
+                style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+              ),
             );
           }
 
@@ -935,6 +953,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                   photoUrl,
                   myId,
                   canFollow,
+                  isDark,
                 ),
                 
                 // ✅ Tab bar (Danışanlar için sadece Bio ve Beğeniler)
@@ -948,7 +967,7 @@ class _PublicClientProfileScreenState extends State<PublicClientProfileScreen> {
                       Expanded(
                   child: TabBarView(
                           children: [
-                      _buildAboutTab(education, cvUrl),
+                      _buildAboutTab(education, cvUrl, isDark),
                       SingleChildScrollView(child: _buildLikedPostsTab()),
                           ],
                         ),

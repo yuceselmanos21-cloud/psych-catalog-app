@@ -76,6 +76,8 @@ class _FeedScreenState extends State<FeedScreen> {
       // Kullanıcı verileri yüklendikten sonra postları yükle
       if (mounted) {
         _loadPosts();
+        // ✅ Uygulama açılınca "Hoş geldin" mesajını göster ve kaybolsun
+        _showWelcomeMessage();
       }
     });
 
@@ -110,6 +112,39 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   // --- LOGIC ---
+
+  // ✅ Uygulama açılınca "Hoş geldin" mesajını göster ve kaybolsun
+  void _showWelcomeMessage() {
+    if (_userName.isNotEmpty && _userName != 'Kullanıcı') {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.waving_hand, color: Colors.white, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Hoş geldin, $_userName!',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.deepPurple,
+              duration: const Duration(seconds: 3),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            ),
+          );
+        }
+      });
+    }
+  }
 
   Future<void> _loadUserData() async {
     final user = _auth.currentUser;
@@ -648,37 +683,41 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
-  // 2. ARAMA (DIALOG AÇAR)
-  Widget _buildSearchBar() {
-    return Expanded(
-      child: InkWell(
-        onTap: _openSearch, // ARTIK TIKLAYINCA DIALOG AÇIYOR
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: Colors.deepPurple.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.deepPurple.withOpacity(0.2)),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.search, size: 18, color: Colors.deepPurple),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Ara...',
-                  style: const TextStyle(fontSize: 13, color: Colors.deepPurple),
-                  overflow: TextOverflow.ellipsis,
-                ),
+  // 2. ARAMA (DIALOG AÇAR) - Compact version for AppBar
+  Widget _buildSearchBarCompact() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return InkWell(
+      onTap: _openSearch,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.deepPurple.withOpacity(0.1) : Colors.deepPurple.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: Colors.deepPurple.withOpacity(0.2)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.search, size: 16, color: isDark ? Colors.deepPurple.shade300 : Colors.deepPurple),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                'Ara...',
+                style: TextStyle(fontSize: 12, color: isDark ? Colors.deepPurple.shade300 : Colors.deepPurple),
+                overflow: TextOverflow.ellipsis,
               ),
-              Icon(Icons.tune, size: 16, color: Colors.deepPurple.withOpacity(0.6)),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
+  }
+  
+  // 2b. ARAMA (DIALOG AÇAR) - Full version (eski versiyon, gerekirse kullanılır)
+  Widget _buildSearchBar() {
+    return _buildSearchBarCompact();
   }
 
   // 3. FİLTRE
@@ -839,31 +878,46 @@ class _FeedScreenState extends State<FeedScreen> {
         titleSpacing: 0,
         automaticallyImplyLeading: false,
         title: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Row(
             children: [
-              // 1. LOGO & İSİM (MODERN)
-              InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: _resetToHome,
-                child: Row(
-                  children: [
-                    Image.asset(
-                      'assets/images/psych_catalog_logo.png',
-                      height: 32,
-                      errorBuilder: (_,__,___) => Icon(Icons.psychology, color: isDark ? Colors.deepPurple : _brandNavy),
-                    ),
-                    const SizedBox(width: 8),
-                    Text('Psych Catalog', style: TextStyle(color: isDark ? Colors.white : _brandNavy, fontWeight: FontWeight.w900, fontSize: 16)),
-                  ],
+              // 1. LOGO & İSİM (MODERN) - Flexible
+              Flexible(
+                flex: 3,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: _resetToHome,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        'assets/images/psych_catalog_logo.png',
+                        height: 28,
+                        errorBuilder: (_,__,___) => Icon(Icons.psychology, color: isDark ? Colors.deepPurple : _brandNavy, size: 20),
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          'Psych Catalog',
+                          style: TextStyle(color: isDark ? Colors.white : _brandNavy, fontWeight: FontWeight.w900, fontSize: 14),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(width: 12),
-              // 2. İÇERİK
+              const SizedBox(width: 4),
+              // 2. MENÜ BUTONU
               _buildTopMainMenu(),
-              const SizedBox(width: 8),
-              _buildSearchBar(),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
+              // 3. ARAMA BUTONU (Flexible)
+              Flexible(
+                flex: 2,
+                child: _buildSearchBarCompact(),
+              ),
+              const SizedBox(width: 4),
+              // 4. FİLTRE BUTONU
               _buildExploreMenu(),
             ],
           ),
@@ -875,24 +929,25 @@ class _FeedScreenState extends State<FeedScreen> {
           ),
           PopupMenuButton<String>(
             color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            child: Row(
-              children: [
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('Hoş geldin,', style: TextStyle(fontSize: 10, color: secondaryTextColor)),
-                    Text(_userName, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textColor)),
-                  ],
-                ),
-                const SizedBox(width: 8),
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: isDark ? Colors.deepPurple.shade800 : Colors.deepPurple.shade100,
-                  child: Text(_userName.isNotEmpty ? _userName[0].toUpperCase() : '?', style: TextStyle(fontSize: 14, color: isDark ? Colors.deepPurple.shade200 : Colors.deepPurple, fontWeight: FontWeight.bold)),
-                ),
-                const SizedBox(width: 4),
-              ],
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: CircleAvatar(
+                radius: 18,
+                backgroundColor: isDark ? Colors.deepPurple.shade800 : Colors.deepPurple.shade100,
+                backgroundImage: _userPhoto != null && _userPhoto!.isNotEmpty 
+                    ? NetworkImage(_userPhoto!) 
+                    : null,
+                child: _userPhoto == null || _userPhoto!.isEmpty
+                    ? Text(
+                        _userName.isNotEmpty ? _userName[0].toUpperCase() : '?',
+                        style: TextStyle(
+                          fontSize: 16,
+                          color: isDark ? Colors.deepPurple.shade200 : Colors.deepPurple,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      )
+                    : null,
+              ),
             ),
             onSelected: (val) async {
               if (val == 'profile') Navigator.pushNamed(context, '/profile');

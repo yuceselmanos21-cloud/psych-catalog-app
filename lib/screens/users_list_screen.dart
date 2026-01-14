@@ -108,6 +108,7 @@ class _UsersListScreenState extends State<UsersListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.isFollowersList ? 'Takipçiler' : 'Takip Edilenler'),
@@ -127,7 +128,7 @@ class _UsersListScreenState extends State<UsersListScreen> {
                     Text(
                       'Liste yüklenirken hata oluştu.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey.shade700),
+                      style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
                     ),
                   ],
                 ),
@@ -150,14 +151,14 @@ class _UsersListScreenState extends State<UsersListScreen> {
                     Icon(
                       widget.isFollowersList ? Icons.people_outline : Icons.person_add_outlined,
                       size: 48,
-                      color: Colors.grey.shade400,
+                      color: isDark ? Colors.grey.shade600 : Colors.grey.shade400,
                     ),
                     const SizedBox(height: 16),
                     Text(
                       widget.isFollowersList
                           ? 'Henüz takipçin yok.'
                           : 'Henüz kimseyi takip etmiyorsun.',
-                      style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+                      style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontSize: 16),
                     ),
                   ],
                 ),

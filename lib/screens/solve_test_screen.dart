@@ -284,6 +284,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
   Widget build(BuildContext context) {
     // BEKLEME EKRANI
     if (_pendingDocId != null) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
       return Scaffold(
         appBar: AppBar(title: const Text("Analiz Yapılıyor...")),
         body: StreamBuilder<DocumentSnapshot>(
@@ -325,7 +326,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: Colors.grey.shade800,
+                          color: isDark ? Colors.grey.shade200 : Colors.grey.shade800,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -333,7 +334,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
                         errorMessage,
                         style: TextStyle(
                           fontSize: 14,
-                          color: Colors.grey.shade600,
+                          color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -428,6 +429,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
 
     // FORM EKRANI
     final progress = _questions.isEmpty ? 0.0 : (_answeredCount / _questions.length);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return Scaffold(
       appBar: AppBar(
@@ -436,7 +438,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
           preferredSize: const Size.fromHeight(4),
           child: LinearProgressIndicator(
             value: progress,
-            backgroundColor: Colors.grey.shade200,
+            backgroundColor: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
             minHeight: 4,
           ),
         ),
@@ -601,7 +603,7 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
                                   if (loadingProgress == null) return child;
                                   return Container(
                                     height: 250,
-                                    color: Colors.grey.shade200,
+                                    color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
                                     child: Center(
                                       child: CircularProgressIndicator(
                                         value: loadingProgress.expectedTotalBytes != null
@@ -616,17 +618,17 @@ class _SolveTestScreenState extends State<SolveTestScreen> {
                                     height: 250,
                                     padding: const EdgeInsets.all(16),
                                     decoration: BoxDecoration(
-                                      color: Colors.grey.shade200,
+                                      color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Column(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        Icon(Icons.broken_image, size: 48, color: Colors.grey.shade600),
+                                        Icon(Icons.broken_image, size: 48, color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                                         const SizedBox(height: 8),
                                         Text(
                                           'Görsel yüklenemedi',
-                                          style: TextStyle(color: Colors.grey.shade600),
+                                          style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                                         ),
                                       ],
                                     ),

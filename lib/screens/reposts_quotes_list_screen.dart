@@ -47,12 +47,18 @@ class _RepostsQuotesListScreenState extends State<RepostsQuotesListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Repostlar ve Alıntılar'),
       ),
       body: _posts.isEmpty && !_loading
-          ? const Center(child: Text('Henüz repost veya alıntı yok'))
+          ? Center(
+              child: Text(
+                'Henüz repost veya alıntı yok',
+                style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+              ),
+            )
           : ListView.builder(
               itemCount: _posts.length + (_hasMore ? 1 : 0),
               itemBuilder: (context, index) {

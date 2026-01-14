@@ -54,7 +54,7 @@ if (!process.env.GEMINI_API_KEY) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Initialize Firebase Admin (REQUIRED for auth)
+// Initialize Firebase Admin (OPTIONAL for development)
 console.log('🔵 Initializing Firebase Admin at startup...');
 let firebaseInitialized = false;
 try {
@@ -67,19 +67,18 @@ try {
     throw new Error('Firebase Admin initialization returned invalid app');
   }
 } catch (error) {
-  console.error('❌ ============================================');
-  console.error('❌ Firebase initialization failed at startup!');
-  console.error('❌ Error message:', error.message);
-  console.error('❌ Error code:', error.code);
-  console.error('❌ Error stack:', error.stack);
-  console.error('❌ ============================================');
-  console.error('❌ Server cannot start without Firebase Admin SDK');
-  console.error('❌ Please check:');
-  console.error('❌   1. FIREBASE_SERVICE_ACCOUNT in .env file');
-  console.error('❌   2. .env file path:', join(__dirname, '../.env'));
-  console.error('❌   3. JSON format is valid');
-  console.error('❌ ============================================');
-  process.exit(1); // ✅ Server'ı durdur, çünkü Firebase olmadan çalışamaz
+  console.warn('⚠️  ============================================');
+  console.warn('⚠️  Firebase initialization failed at startup!');
+  console.warn('⚠️  Error message:', error.message);
+  console.warn('⚠️  ============================================');
+  console.warn('⚠️  Server will start but Firebase features will be disabled');
+  console.warn('⚠️  To enable Firebase, please check:');
+  console.warn('⚠️    1. FIREBASE_SERVICE_ACCOUNT in .env file');
+  console.warn('⚠️    2. .env file path:', join(__dirname, '../.env'));
+  console.warn('⚠️    3. JSON format is valid');
+  console.warn('⚠️  ============================================');
+  firebaseInitialized = false;
+  // ✅ Server'ı durdurma, development için çalışmaya devam et
 }
 
 // Middleware

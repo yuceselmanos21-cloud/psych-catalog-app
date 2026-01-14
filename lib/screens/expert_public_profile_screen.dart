@@ -654,6 +654,8 @@ class _ExpertPublicProfileScreenState extends State<ExpertPublicProfileScreen> {
                 title: Text(
                   title,
                   style: const TextStyle(fontWeight: FontWeight.w600),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: desc.isNotEmpty
                     ? Padding(
@@ -741,6 +743,8 @@ class _ExpertPublicProfileScreenState extends State<ExpertPublicProfileScreen> {
                 title: Text(
                   safeTitle,
                   style: const TextStyle(fontWeight: FontWeight.w600),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -866,6 +870,7 @@ class _ExpertPublicProfileScreenState extends State<ExpertPublicProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final userRef = FirebaseFirestore.instance.collection('users').doc(widget.expertId);
 
     final testRepo = FirestoreTestRepository();

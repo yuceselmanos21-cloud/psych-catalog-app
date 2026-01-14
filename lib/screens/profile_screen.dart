@@ -770,6 +770,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     fontWeight: FontWeight.w600,
                     fontSize: 15,
                   ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: dt == null
                     ? null

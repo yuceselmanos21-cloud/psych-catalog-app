@@ -18,12 +18,18 @@ class ExpertTestListScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final user = FirebaseAuth.instance.currentUser;
     final testRepo = FirestoreTestRepository();
 
     if (user == null) {
-      return const Scaffold(
-        body: Center(child: Text('Önce giriş yapmalısın.')),
+      return Scaffold(
+        body: Center(
+          child: Text(
+            'Önce giriş yapmalısın.',
+            style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+          ),
+        ),
       );
     }
 
@@ -39,13 +45,21 @@ class ExpertTestListScreen extends StatelessWidget {
           }
 
           if (snapshot.hasError) {
-            return const Center(
-              child: Text('Testler yüklenirken hata oluştu.'),
+            return Center(
+              child: Text(
+                'Testler yüklenirken hata oluştu.',
+                style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+              ),
             );
           }
 
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Henüz test oluşturmadın.'));
+            return Center(
+              child: Text(
+                'Henüz test oluşturmadın.',
+                style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+              ),
+            );
           }
 
           final docs = snapshot.data!.docs.toList();

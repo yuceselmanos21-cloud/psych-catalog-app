@@ -42,7 +42,7 @@ class _TestsListScreenState extends State<TestsListScreen> {
         '${dt.year}';
   }
 
-  Widget _buildAnswerTypeChip(String answerType) {
+  Widget _buildAnswerTypeChip(String answerType, bool isDark) {
     String label;
     IconData icon;
     Color bg;
@@ -51,12 +51,12 @@ class _TestsListScreenState extends State<TestsListScreen> {
     if (answerType == 'scale') {
       label = '1-5 arası puanlama';
       icon = Icons.format_list_numbered;
-      bg = Colors.deepPurple.shade50;
+      bg = isDark ? Colors.deepPurple.shade900.withOpacity(0.3) : Colors.deepPurple.shade50;
       fg = Colors.deepPurple;
     } else {
       label = 'Serbest metin';
       icon = Icons.text_fields;
-      bg = Colors.blueGrey.shade50;
+      bg = isDark ? Colors.blueGrey.shade900.withOpacity(0.3) : Colors.blueGrey.shade50;
       fg = Colors.blueGrey;
     }
 
@@ -238,13 +238,13 @@ class _TestsListScreenState extends State<TestsListScreen> {
                                   Expanded(
                                     child: Text(
                                       'Uzman: $expertName',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 12,
-                                        color: Colors.grey,
+                                        color: isDark ? Colors.grey.shade400 : Colors.grey,
                                       ),
                                     ),
                                   ),
-                                  _buildAnswerTypeChip(answerType),
+                                  _buildAnswerTypeChip(answerType, isDark),
                                 ],
                               ),
                             ],

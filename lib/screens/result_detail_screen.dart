@@ -90,7 +90,13 @@ class ResultDetailScreen extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      appBar: AppBar(title: Text(testTitle)),
+      appBar: AppBar(
+        title: Text(
+          testTitle,
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+        ),
+      ),
       body: FutureBuilder<DocumentSnapshot>(
         future: myUid != null ? FirebaseFirestore.instance.collection('users').doc(myUid).get() : null,
         builder: (context, userSnap) {
@@ -968,6 +974,8 @@ class ResultDetailScreen extends StatelessWidget {
                           fontWeight: FontWeight.w500,
                           color: isDark ? Colors.white : Colors.black87,
                         ),
+                        maxLines: 10,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -1026,6 +1034,8 @@ class ResultDetailScreen extends StatelessWidget {
                             color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
                             fontStyle: answerText.isEmpty ? FontStyle.italic : FontStyle.normal,
                           ),
+                          maxLines: 10,
+                          overflow: TextOverflow.ellipsis,
                         ),
                     ],
                   ),
@@ -1180,6 +1190,8 @@ class ResultDetailScreen extends StatelessWidget {
                 fontSize: 13,
                 color: isDark ? Colors.grey.shade400 : Colors.grey.shade700,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
             if (specialtyList.isNotEmpty) ...[
               const SizedBox(height: 6),

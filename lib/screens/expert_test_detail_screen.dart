@@ -40,6 +40,7 @@ class ExpertTestDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final testRepo = FirestoreTestRepository();
 
     return Scaffold(
@@ -54,11 +55,21 @@ class ExpertTestDetailScreen extends StatelessWidget {
           }
 
           if (snapshot.hasError) {
-            return const Center(child: Text('Test yüklenirken hata oluştu.'));
+            return Center(
+              child: Text(
+                'Test yüklenirken hata oluştu.',
+                style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+              ),
+            );
           }
 
           if (!snapshot.hasData || !snapshot.data!.exists) {
-            return const Center(child: Text('Test bulunamadı.'));
+            return Center(
+              child: Text(
+                'Test bulunamadı.',
+                style: TextStyle(color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+              ),
+            );
           }
 
           final data = snapshot.data!.data() ?? <String, dynamic>{};
@@ -113,9 +124,9 @@ class ExpertTestDetailScreen extends StatelessWidget {
                   const SizedBox(height: 8),
 
                   if (questions.isEmpty)
-                    const Text(
+                    Text(
                       'Bu testte soru bulunamadı.',
-                      style: TextStyle(color: Colors.grey),
+                      style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey),
                     )
                   else
                     ...questions.asMap().entries.map(
