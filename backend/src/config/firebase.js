@@ -126,6 +126,16 @@ export function initializeFirebase() {
           projectId: serviceAccount.project_id, // ✅ Explicit project ID
         });
         console.log('✅ Firebase Admin app initialized with projectId:', serviceAccount.project_id);
+        
+        // ✅ Firestore settings - proxy ve timeout ayarları
+        const firestoreSettings = {
+          ignoreUndefinedProperties: true,
+        };
+        
+        // Firestore instance'ı al ve settings uygula
+        const firestore = admin.firestore();
+        firestore.settings(firestoreSettings);
+        console.log('✅ Firestore settings configured');
       } catch (parseError) {
         console.error('❌ Error parsing FIREBASE_SERVICE_ACCOUNT:', parseError.message);
         console.error('❌ Error stack:', parseError.stack);

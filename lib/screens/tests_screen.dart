@@ -1,7 +1,13 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 
 import '../repositories/firestore_test_repository.dart';
+import '../repositories/firestore_report_repository.dart';
+import '../services/analytics_service.dart';
+import '../utils/error_handler.dart';
 
 class TestsScreen extends StatefulWidget {
   const TestsScreen({super.key});
@@ -12,6 +18,32 @@ class TestsScreen extends StatefulWidget {
 
 class _TestsScreenState extends State<TestsScreen> {
   String _searchQuery = '';
+  String _displaySearchQuery = ''; // ✅ PERFORMANCE: Debounced search query
+  Timer? _debounceTimer;
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String value) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() {
+          _displaySearchQuery = value.toLowerCase().trim();
+        });
+      }
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('tests');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +62,8 @@ class _TestsScreenState extends State<TestsScreen> {
             padding: const EdgeInsets.all(12),
             child: TextField(
               onChanged: (value) {
-                setState(() => _searchQuery = value.toLowerCase().trim());
+                setState(() => _searchQuery = value);
+                _onSearchChanged(value);
               },
               decoration: InputDecoration(
                 hintText: 'Test ara...',
@@ -111,14 +144,14 @@ class _TestsScreenState extends State<TestsScreen> {
                   return bTime.compareTo(aTime);
                 });
 
-                // Filter by search query
-                final filteredDocs = _searchQuery.isEmpty
+                // ✅ PERFORMANCE: Filter by debounced search query
+                final filteredDocs = _displaySearchQuery.isEmpty
                     ? docs
                     : docs.where((doc) {
                         final data = doc.data();
                         final title = (data['title']?.toString() ?? '').toLowerCase();
                         final description = (data['description']?.toString() ?? '').toLowerCase();
-                        return title.contains(_searchQuery) || description.contains(_searchQuery);
+                        return title.contains(_displaySearchQuery) || description.contains(_displaySearchQuery);
                       }).toList();
 
                 if (filteredDocs.isEmpty) {
@@ -254,6 +287,16 @@ class _TestsScreenState extends State<TestsScreen> {
                                       color: isDark ? Colors.grey.shade500 : Colors.grey.shade600,
                                     ),
                                   ),
+                                  const Spacer(),
+                                  // Şikayet Butonu
+                                  IconButton(
+                                    icon: const Icon(Icons.flag_outlined, size: 18),
+                                    color: Colors.orange,
+                                    tooltip: 'Testi Şikayet Et',
+                                    onPressed: () => _showTestReportDialog(context, doc.id, title),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                  ),
                                 ],
                               ),
                             ],
@@ -269,5 +312,119 @@ class _TestsScreenState extends State<TestsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _showTestReportDialog(BuildContext context, String testId, String testTitle) async {
+    final reasonCtrl = TextEditingController();
+    final detailsCtrl = TextEditingController();
+    File? selectedFile;
+    String? fileName;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Testi Şikayet Et'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Test: $testTitle',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                const Text('Şikayet Gerekçesi *'),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: reasonCtrl,
+                  decoration: const InputDecoration(
+                    hintText: 'Örn: Uygunsuz içerik, yanlış bilgi, spam...',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 3,
+                ),
+                const SizedBox(height: 16),
+                const Text('Açıklama (isteğe bağlı)'),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: detailsCtrl,
+                  decoration: const InputDecoration(
+                    hintText: 'Ek bilgiler...',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 3,
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    try {
+                      final fileResult = await FilePicker.platform.pickFiles(type: FileType.any);
+                      if (fileResult != null && fileResult.files.single.path != null) {
+                        setDialogState(() {
+                          selectedFile = File(fileResult.files.single.path!);
+                          fileName = fileResult.files.single.name;
+                        });
+                      }
+                    } catch (e) {
+                      // Hata durumunda sessizce devam et
+                    }
+                  },
+                  icon: const Icon(Icons.attach_file),
+                  label: Text(fileName ?? 'Dosya Ekle (isteğe bağlı)'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('İptal'),
+            ),
+            ElevatedButton(
+              onPressed: reasonCtrl.text.trim().isEmpty
+                  ? null
+                  : () => Navigator.pop(context, true),
+              child: const Text('Şikayet Et'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result != true) return;
+
+    if (reasonCtrl.text.trim().isEmpty) {
+      AppErrorHandler.showInfo(context, 'Lütfen şikayet gerekçesini belirtin');
+      return;
+    }
+
+    try {
+      final reportRepo = FirestoreReportRepository();
+      await reportRepo.createReport(
+        targetType: 'test',
+        targetId: testId,
+        reason: reasonCtrl.text.trim(),
+        details: detailsCtrl.text.trim(),
+        attachment: selectedFile,
+      );
+
+      if (context.mounted) {
+        AppErrorHandler.showSuccess(
+          context,
+          'Şikayetiniz admin\'e iletildi. İnceleme sonrası gerekli işlemler yapılacaktır.',
+        );
+      }
+    } catch (e, stackTrace) {
+      if (context.mounted) {
+        AppErrorHandler.handleError(
+          context,
+          e,
+          stackTrace: stackTrace,
+          customMessage: 'Şikayet gönderilirken bir hata oluştu',
+        );
+      }
+    }
   }
 }

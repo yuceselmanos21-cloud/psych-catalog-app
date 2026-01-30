@@ -19,8 +19,23 @@ router.post('/analyze', validateTestAnalysis, async (req, res, next) => {
     // Get Firestore instance (ensures Firebase is initialized)
     const db = getDb();
 
-    // Get solved test document
-    const solvedTestDoc = await db.collection('solvedTests').doc(docId).get();
+    // Get solved test document (with retry for connection issues)
+    let solvedTestDoc;
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        solvedTestDoc = await db.collection('solvedTests').doc(docId).get();
+        break;
+      } catch (error) {
+        retries--;
+        if (retries === 0) {
+          logger.error('Firestore connection failed after retries', { docId, error: error.message });
+          throw error;
+        }
+        logger.warn(`Firestore get() failed, retrying... (${retries} left)`, { docId });
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
     
     if (!solvedTestDoc.exists) {
       logger.warn('Test dokümanı bulunamadı', { docId });

@@ -130,5 +130,20 @@ service firebase.storage {
                    && isDocument()
                    && request.resource.size < 5 * 1024 * 1024;
     }
+
+    // --- RAPOR EKLEMLERİ (report_attachments/{userId}/{fileName}) ---
+    match /report_attachments/{userId}/{fileName} {
+      // Okuma: Sadece sahibi ve Admin (token'dan kontrol)
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        request.auth.token.role == 'admin'
+      );
+      
+      // Yazma: Sadece sahibi (1MB altı resim/belge)
+      allow write: if isAuthenticated()
+                   && request.auth.uid == userId
+                   && (isImage() || isDocument())
+                   && isSmallFile();
+    }
   }
 }

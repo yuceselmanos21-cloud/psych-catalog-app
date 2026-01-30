@@ -32,61 +32,93 @@ import 'screens/chat_screen.dart';
 
 import 'screens/analysis_screen.dart';
 import 'screens/ai_consultations_screen.dart';
-import 'screens/ai_consultation_detail_screen.dart';
 import 'screens/search_screen.dart';
+import 'screens/settings_screen.dart';
+import 'screens/expert_registration_screen.dart';
+import 'screens/subscription_management_screen.dart';
+import 'screens/account_management_screen.dart';
 import 'screens/admin/admin_dashboard_screen.dart';
-import 'services/theme_service.dart';
+import 'screens/groups_screen.dart';
+import 'core/di/service_locator.dart';
+import 'config/app_config.dart';
+import 'config/production_config.dart';
+import 'utils/logger.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/providers/theme_provider.dart';
+import 'services/notification_service.dart' show NotificationService, firebaseMessagingBackgroundHandler;
+import 'l10n/app_localizations.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const MyApp());
+  
+  try {
+    // Firebase'i initialize et
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    
+    // Crashlytics setup (production'da)
+    if (AppConfig.enableCrashlytics) {
+      FlutterError.onError = (errorDetails) {
+        FirebaseCrashlytics.instance.recordFlutterFatalError(errorDetails);
+      };
+      
+      PlatformDispatcher.instance.onError = (error, stack) {
+        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+        return true;
+      };
+    }
+    
+    // Service locator setup
+    await setupServiceLocator();
+    
+    // Production config
+    ProductionConfig.initialize();
+    await ProductionConfig.verifyProductionReadiness();
+    
+    // Initialize notifications
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    await NotificationService.initialize();
+    
+    AppLogger.success('App initialization completed');
+  } catch (e, stackTrace) {
+    // Initialization hatası
+    AppLogger.error(
+      'App initialization failed',
+      error: e,
+      stackTrace: stackTrace,
+    );
+    if (AppConfig.enableCrashlytics) {
+      FirebaseCrashlytics.instance.recordError(e, stackTrace, fatal: true);
+    }
+    rethrow;
+  }
+  
+  runApp(
+    const ProviderScope(
+      child: MyApp(),
+    ),
+  );
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends ConsumerWidget {
   const MyApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  final ThemeService _themeService = ThemeService();
-
-  @override
-  void initState() {
-    super.initState();
-    // ✅ ThemeService değişikliklerini dinle
-    _themeService.addListener(_onThemeChanged);
-  }
-
-  void _onThemeChanged() {
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  @override
-  void dispose() {
-    // ✅ Singleton olduğu için dispose etme, sadece listener'ı kaldır
-    _themeService.removeListener(_onThemeChanged);
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(themeProvider);
+    
     return MaterialApp(
       title: 'Psych Catalog',
       debugShowCheckedModeBanner: false,
       localizationsDelegates: const [
+        AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [
-        Locale('tr', 'TR'), // Türkçe
-        Locale('en', 'US'), // İngilizce (fallback)
-      ],
+      supportedLocales: AppLocalizations.supportedLocales,
       locale: const Locale('tr', 'TR'),
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -140,7 +172,7 @@ class _MyAppState extends State<MyApp> {
         ),
         dividerColor: Colors.grey.shade800,
       ),
-      themeMode: _themeService.themeMode,
+      themeMode: themeMode,
       home: StreamBuilder<User?>(
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {
@@ -166,6 +198,15 @@ class _MyAppState extends State<MyApp> {
           case '/analysis': return MaterialPageRoute(builder: (_) => const AnalysisScreen());
           case '/aiConsultations': return MaterialPageRoute(builder: (_) => const AIConsultationsScreen());
           case '/search': return MaterialPageRoute(builder: (_) => const SearchScreen());
+          case '/settings': return MaterialPageRoute(builder: (_) => const SettingsScreen());
+          case '/expertRegistration': 
+            return MaterialPageRoute(builder: (_) => const ExpertRegistrationScreen());
+          case '/subscription': 
+            return MaterialPageRoute(builder: (_) => const SubscriptionManagementScreen());
+          case '/accountManagement': 
+            return MaterialPageRoute(builder: (_) => const AccountManagementScreen());
+          case '/groups':
+            return MaterialPageRoute(builder: (_) => const GroupsScreen());
 
         // ✅ DÜZELTİLDİ: Chat ID üretimi
           case '/chat':

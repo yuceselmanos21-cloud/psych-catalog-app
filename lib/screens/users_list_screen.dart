@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../repositories/firestore_follow_repository.dart';
 import '../repositories/firestore_user_repository.dart';
+import '../repositories/firestore_block_repository.dart';
 
 class UsersListScreen extends StatefulWidget {
   final String userId;
@@ -21,6 +22,7 @@ class UsersListScreen extends StatefulWidget {
 class _UsersListScreenState extends State<UsersListScreen> {
   final _followRepo = FirestoreFollowRepository();
   final _userRepo = FirestoreUserRepository();
+  final _blockRepo = FirestoreBlockRepository();
   final _me = FirebaseAuth.instance.currentUser;
 
   Stream<QuerySnapshot<Map<String, dynamic>>> _getUsersStream() {
@@ -166,99 +168,143 @@ class _UsersListScreenState extends State<UsersListScreen> {
             );
           }
 
-          return ListView.builder(
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final doc = docs[index];
-              final userId = _extractUserId(doc);
+          // ✅ Engellenen kullanıcıları filtrele
+          final currentUserId = _me?.uid;
+          if (currentUserId == null) {
+            return const Center(child: Text('Giriş yapın'));
+          }
 
-              return FutureBuilder<Map<String, dynamic>>(
-                future: _userRepo.getUser(userId),
-                builder: (context, userSnap) {
-                  if (userSnap.connectionState == ConnectionState.waiting) {
-                    return const ListTile(
-                      leading: CircularProgressIndicator(strokeWidth: 2),
-                      title: Text('Yükleniyor...'),
-                    );
-                  }
-
-                  if (!userSnap.hasData) {
-                    return const ListTile(
-                      title: Text('Kullanıcı bulunamadı'),
-                    );
-                  }
-
-                  final userData = userSnap.data!;
-                  final name = userData['name']?.toString() ?? 'Kullanıcı';
-                  final username = userData['username']?.toString() ?? '';
-                  final photoUrl = userData['photoUrl']?.toString();
-                  final role = userData['role']?.toString() ?? 'client';
-                  final isExpert = role == 'expert';
-                  final profession = userData['profession']?.toString() ?? '';
-                  final city = userData['city']?.toString() ?? '';
-
-                  final isMe = _me?.uid == userId;
-                  final canFollow = !isMe && _me != null;
-
-                  return ListTile(
-                    leading: CircleAvatar(
-                      backgroundImage: photoUrl != null && photoUrl.isNotEmpty
-                          ? NetworkImage(photoUrl)
-                          : null,
-                      child: photoUrl == null || photoUrl.isEmpty
-                          ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?')
-                          : null,
-                    ),
-                    title: Row(
+          return StreamBuilder<Set<String>>(
+            stream: _blockRepo.watchBlockedIds(currentUserId),
+            builder: (context, blockedSnap) {
+              final blockedIds = blockedSnap.data ?? <String>{};
+              
+              // Filter out blocked users
+              final filteredDocs = docs.where((doc) {
+                final userId = _extractUserId(doc);
+                return !blockedIds.contains(userId);
+              }).toList();
+              
+              if (filteredDocs.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Expanded(
-                          child: Text(
-                            name,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
+                        Icon(
+                          widget.isFollowersList ? Icons.people_outline : Icons.person_add_outlined,
+                          size: 48,
+                          color: isDark ? Colors.grey.shade600 : Colors.grey.shade400,
                         ),
-                        if (isExpert)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.shade100,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: const Text(
-                              'Uzman',
-                              style: TextStyle(fontSize: 10, color: Colors.blue),
-                            ),
-                          ),
+                        const SizedBox(height: 16),
+                        Text(
+                          widget.isFollowersList
+                              ? 'Henüz takipçin yok.'
+                              : 'Henüz kimseyi takip etmiyorsun.',
+                          style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600, fontSize: 16),
+                        ),
                       ],
                     ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (username.isNotEmpty) Text('@$username'),
-                        if (profession.isNotEmpty) Text(profession),
-                        if (city.isNotEmpty) Text(city),
-                      ],
-                    ),
-                    trailing: canFollow
-                        ? FutureBuilder<bool>(
-                            future: _isFollowing(userId),
-                            builder: (context, followSnap) {
-                              if (followSnap.connectionState == ConnectionState.waiting) {
-                                return const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                );
-                              }
-                              final isFollowing = followSnap.data ?? false;
-                              return TextButton(
-                                onPressed: () => _toggleFollow(userId),
-                                child: Text(isFollowing ? 'Takiptesin' : 'Takip Et'),
-                              );
-                            },
-                          )
-                        : null,
-                    onTap: () => _navigateToProfile(userId, userData),
+                  ),
+                );
+              }
+              
+              return ListView.builder(
+                itemCount: filteredDocs.length,
+                itemBuilder: (context, index) {
+                  final doc = filteredDocs[index];
+                  final userId = _extractUserId(doc);
+
+                  return FutureBuilder<Map<String, dynamic>>(
+                    future: _userRepo.getUser(userId),
+                    builder: (context, userSnap) {
+                      if (userSnap.connectionState == ConnectionState.waiting) {
+                        return const ListTile(
+                          leading: CircularProgressIndicator(strokeWidth: 2),
+                          title: Text('Yükleniyor...'),
+                        );
+                      }
+
+                      if (!userSnap.hasData) {
+                        return const ListTile(
+                          title: Text('Kullanıcı bulunamadı'),
+                        );
+                      }
+
+                      final userData = userSnap.data!;
+                      final name = userData['name']?.toString() ?? 'Kullanıcı';
+                      final username = userData['username']?.toString() ?? '';
+                      final photoUrl = userData['photoUrl']?.toString();
+                      final role = userData['role']?.toString() ?? 'client';
+                      final isExpert = role == 'expert';
+                      final profession = userData['profession']?.toString() ?? '';
+                      final city = userData['city']?.toString() ?? '';
+
+                      final isMe = _me?.uid == userId;
+                      final canFollow = !isMe && _me != null;
+
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundImage: photoUrl != null && photoUrl.isNotEmpty
+                              ? NetworkImage(photoUrl)
+                              : null,
+                          child: photoUrl == null || photoUrl.isEmpty
+                              ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?')
+                              : null,
+                        ),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                name,
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            if (isExpert)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.shade100,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Text(
+                                  'Uzman',
+                                  style: TextStyle(fontSize: 10, color: Colors.blue),
+                                ),
+                              ),
+                          ],
+                        ),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (username.isNotEmpty) Text('@$username'),
+                            if (profession.isNotEmpty) Text(profession),
+                            if (city.isNotEmpty) Text(city),
+                          ],
+                        ),
+                        trailing: canFollow
+                            ? FutureBuilder<bool>(
+                                future: _isFollowing(userId),
+                                builder: (context, followSnap) {
+                                  if (followSnap.connectionState == ConnectionState.waiting) {
+                                    return const SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    );
+                                  }
+                                  final isFollowing = followSnap.data ?? false;
+                                  return TextButton(
+                                    onPressed: () => _toggleFollow(userId),
+                                    child: Text(isFollowing ? 'Takiptesin' : 'Takip Et'),
+                                  );
+                                },
+                              )
+                            : null,
+                        onTap: () => _navigateToProfile(userId, userData),
+                      );
+                    },
                   );
                 },
               );

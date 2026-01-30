@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../repositories/firestore_chat_repository.dart';
 import '../repositories/firestore_user_repository.dart';
+import '../repositories/firestore_block_repository.dart';
 import 'chat_screen.dart';
 
 class ChatListScreen extends StatelessWidget {
@@ -36,6 +37,7 @@ class ChatListScreen extends StatelessWidget {
 
     final repo = FirestoreChatRepository();
     final userRepo = FirestoreUserRepository();
+    final blockRepo = FirestoreBlockRepository();
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -83,23 +85,60 @@ class ChatListScreen extends StatelessWidget {
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final doc = docs[index];
-              final data = doc.data() as Map<String, dynamic>;
-              final chatId = doc.id;
-              final lastMsg = data['lastMessage']?.toString() ?? '';
-              final lastMessageAt = data['lastMessageAt'] as Timestamp?;
-              final lastSenderId = data['lastSenderId']?.toString();
-              final participants = List<String>.from(data['participants'] ?? []);
-              final otherId = participants.firstWhere((id) => id != myUid, orElse: () => '');
-              final isMeLastSender = lastSenderId == myUid;
+          return StreamBuilder<Set<String>>(
+            stream: blockRepo.watchBlockedIds(myUid),
+            builder: (context, blockedSnap) {
+              final blockedIds = blockedSnap.data ?? <String>{};
+              
+              // Filter out chats with blocked users
+              final filteredDocs = docs.where((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final participants = List<String>.from(data['participants'] ?? []);
+                final otherId = participants.firstWhere((id) => id != myUid, orElse: () => '');
+                // Don't show if I blocked them or they blocked me
+                return !blockedIds.contains(otherId);
+              }).toList();
+              
+              if (filteredDocs.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.chat_bubble_outline,
+                        size: 64,
+                        color: isDark ? Colors.grey.shade600 : Colors.grey.shade400,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Henüz mesajın yok',
+                        style: TextStyle(
+                          color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              
+              return ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                itemCount: filteredDocs.length,
+                itemBuilder: (context, index) {
+                  final doc = filteredDocs[index];
+                  final data = doc.data() as Map<String, dynamic>;
+                  final chatId = doc.id;
+                  final lastMsg = data['lastMessage']?.toString() ?? '';
+                  final lastMessageAt = data['lastMessageAt'] as Timestamp?;
+                  final lastSenderId = data['lastSenderId']?.toString();
+                  final participants = List<String>.from(data['participants'] ?? []);
+                  final otherId = participants.firstWhere((id) => id != myUid, orElse: () => '');
+                  final isMeLastSender = lastSenderId == myUid;
 
-              return FutureBuilder<Map<String, dynamic>?>(
-                future: userRepo.getUserById(otherId),
-                builder: (context, userSnapshot) {
+                  return FutureBuilder<Map<String, dynamic>?>(
+                    future: userRepo.getUserById(otherId),
+                    builder: (context, userSnapshot) {
                   final userName = userSnapshot.data?['name']?.toString() ?? 'Kullanıcı';
                   final photoUrl = userSnapshot.data?['photoUrl']?.toString();
                   final role = userSnapshot.data?['role']?.toString() ?? 'client';
@@ -207,6 +246,8 @@ class ChatListScreen extends StatelessWidget {
                   );
                 },
               );
+            },
+          );
             },
           );
         },

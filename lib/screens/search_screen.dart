@@ -6,11 +6,12 @@ import '../models/post_model.dart';
 import '../repositories/firestore_post_repository.dart';
 import '../repositories/firestore_user_repository.dart';
 import '../services/search_service.dart';
+import '../services/analytics_service.dart';
 import '../widgets/post_card.dart';
 import 'expert_public_profile_screen.dart';
 import 'public_client_profile_screen.dart';
 
-enum SearchTarget { all, posts, people }
+enum SearchTarget { all, posts, people, tests }
 enum SearchPersonKind { any, expert, client }
 
 class SearchScreen extends StatefulWidget {
@@ -49,6 +50,8 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('search');
     _loadCurrentUserData();
     _searchCtrl.addListener(_onSearchChanged);
     _expertiseCtrl.addListener(_onExpertiseChanged);
@@ -203,6 +206,15 @@ class _SearchScreenState extends State<SearchScreen> {
                         });
                       },
                     ),
+                    ChoiceChip(
+                      label: const Text('Test'),
+                      selected: _searchTarget == SearchTarget.tests,
+                      selectedColor: Colors.deepPurple,
+                      labelStyle: TextStyle(
+                        color: _searchTarget == SearchTarget.tests ? Colors.white : (isDark ? Colors.white : Colors.black),
+                      ),
+                      onSelected: (_) => setState(() => _searchTarget = SearchTarget.tests),
+                    ),
                   ],
                 ),
                 // Kişi Filtreleri
@@ -298,12 +310,20 @@ class _SearchScreenState extends State<SearchScreen> {
       return _buildPeopleResults(query);
     }
     
+    // Test aramasında query gerekli
+    if (_searchTarget == SearchTarget.tests) {
+      if (query.isEmpty) {
+        return _buildEmptyState('Test aramak için yukarıdaki kutuya yazın');
+      }
+      return _buildTestResults(query);
+    }
+    
     // Post veya Genel aramasında query gerekli
     if (query.isEmpty) {
       return _buildEmptyState('Arama yapmak için yukarıdaki kutuya yazın');
     }
 
-    // "Genel" modunda hem post hem kişi sonuçlarını göster
+    // "Genel" modunda hem post hem kişi hem test sonuçlarını göster
     if (_searchTarget == SearchTarget.all) {
       return SingleChildScrollView(
         child: Column(
@@ -337,11 +357,27 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
             _buildPeopleResults(query, showFullHeight: false),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'Testler',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).brightness == Brightness.dark 
+                      ? Colors.white 
+                      : Colors.black87,
+                ),
+              ),
+            ),
+            _buildTestResults(query, showFullHeight: false),
           ],
         ),
       );
     } else if (_searchTarget == SearchTarget.posts) {
       return _buildPostResults(query);
+    } else if (_searchTarget == SearchTarget.tests) {
+      return _buildTestResults(query);
     }
 
     return _buildEmptyState('Sonuç bulunamadı');
@@ -571,6 +607,184 @@ class _SearchScreenState extends State<SearchScreen> {
     }
 
     return queryRef;
+  }
+
+  Widget _buildTestResults(String query, {bool showFullHeight = true}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+    final borderColor = isDark ? Colors.grey.shade800 : Colors.grey.shade200;
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('tests')
+          .orderBy('createdAt', descending: true)
+          .limit(50)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (!snapshot.hasData) {
+          return _buildEmptyState('Sonuç bulunamadı');
+        }
+
+        final tests = snapshot.data!.docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final title = (data['title'] ?? '').toString().toLowerCase();
+          final description = (data['description'] ?? '').toString().toLowerCase();
+          final expertName = (data['expertName'] ?? '').toString().toLowerCase();
+          final queryLower = query.toLowerCase();
+          
+          return title.contains(queryLower) ||
+                 description.contains(queryLower) ||
+                 expertName.contains(queryLower);
+        }).toList();
+
+        if (tests.isEmpty) {
+          return _buildEmptyState('"$query" için test bulunamadı');
+        }
+
+        final listView = ListView.builder(
+          shrinkWrap: !showFullHeight,
+          physics: showFullHeight ? null : const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          itemCount: tests.length > 5 && !showFullHeight ? 5 : tests.length,
+          itemBuilder: (context, index) {
+            final testDoc = tests[index];
+            final data = testDoc.data() as Map<String, dynamic>;
+            final title = data['title'] ?? 'Başlıksız Test';
+            final description = data['description'] ?? '';
+            final expertName = data['expertName'] ?? '';
+            final answerType = data['answerType'] ?? 'text';
+            final questions = data['questions'];
+            final questionCount = questions is List ? questions.length : 0;
+
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              elevation: 0,
+              color: cardBg,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: borderColor, width: 1),
+              ),
+              child: InkWell(
+                onTap: () {
+                  Navigator.pushNamed(
+                    context,
+                    '/solveTest',
+                    arguments: {
+                      'id': testDoc.id,
+                      ...data,
+                      'answerType': answerType,
+                    },
+                  );
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.quiz_outlined,
+                            color: Colors.deepPurple,
+                            size: 24,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right,
+                            color: isDark ? Colors.grey.shade600 : Colors.grey.shade400,
+                          ),
+                        ],
+                      ),
+                      if (description.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          description,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          if (expertName.isNotEmpty) ...[
+                            Icon(
+                              Icons.person_outline,
+                              size: 14,
+                              color: Colors.deepPurple,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              expertName,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.deepPurple,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                          ],
+                          Icon(
+                            Icons.help_outline,
+                            size: 14,
+                            color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '$questionCount soru',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Icon(
+                            Icons.edit_note,
+                            size: 14,
+                            color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            answerType == 'scale' ? 'Ölçek' : answerType == 'multiple_choice' ? 'Çoktan Seçmeli' : 'Metin',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+
+        if (showFullHeight) {
+          return listView;
+        } else {
+          return SizedBox(height: 400, child: listView);
+        }
+      },
+    );
   }
 
   Widget _buildEmptyState(String message) {

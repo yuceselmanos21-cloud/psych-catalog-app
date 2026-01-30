@@ -8,9 +8,13 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path/path.dart' as path;
 
 import '../repositories/firestore_post_repository.dart';
+import '../repositories/firestore_block_repository.dart';
+import '../repositories/firestore_subscription_repository.dart';
 import '../models/post_model.dart';
 import '../widgets/post_card.dart';
 import '../services/search_service.dart';
+import '../services/analytics_service.dart';
+import '../utils/error_handler.dart';
 import 'experts_list_screen.dart';
 import '../main.dart';
 import '../services/theme_service.dart';
@@ -32,7 +36,10 @@ class _FeedScreenState extends State<FeedScreen> {
   final _postRepo = FirestorePostRepository.instance;
   final _auth = FirebaseAuth.instance;
   final _discoverService = DiscoverService();
+  final _blockRepo = FirestoreBlockRepository();
   static const Color _brandNavy = Color(0xFF0D1B3D);
+  // ✅ Koyu neon yeşil renk
+  static const Color _neonGreen = Color(0xFF00CC00);
 
   // Pagination & Akış
   final ScrollController _scrollController = ScrollController();
@@ -60,6 +67,7 @@ class _FeedScreenState extends State<FeedScreen> {
   String? _userUsername; // Cache için
   String? _userProfession; // Cache için
   List<String> _myFollowingIds = [];
+  Set<String> _blockedIds = {}; // Engellenen kullanıcı ID'leri
   bool _isAdmin = false;
 
   // Composer Data
@@ -71,10 +79,13 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   void initState() {
     super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('feed');
     // Önce kullanıcı verilerini yükle (admin kontrolü dahil)
     _loadUserData().then((_) {
       // Kullanıcı verileri yüklendikten sonra postları yükle
       if (mounted) {
+        _feedLog('FEED_DEBUG', '--- Feed ilk yükleme; kopyalamak için [FEED_DEBUG] ile başlayan satırları al ---');
         _loadPosts();
         // ✅ Uygulama açılınca "Hoş geldin" mesajını göster ve kaybolsun
         _showWelcomeMessage();
@@ -108,6 +119,7 @@ class _FeedScreenState extends State<FeedScreen> {
     _scrollController.dispose();
     _postCtrl.dispose();
     _scrollDebounceTimer?.cancel();
+    _scrollDebounceTimer?.cancel();
     super.dispose();
   }
 
@@ -132,7 +144,7 @@ class _FeedScreenState extends State<FeedScreen> {
                   ),
                 ],
               ),
-              backgroundColor: Colors.deepPurple,
+              backgroundColor: _neonGreen,
               duration: const Duration(seconds: 3),
               behavior: SnackBarBehavior.floating,
               shape: RoundedRectangleBorder(
@@ -156,12 +168,15 @@ class _FeedScreenState extends State<FeedScreen> {
       final adminFuture = FirebaseFirestore.instance.collection('admins').doc(user.uid).get();
       final followingFuture = FirebaseFirestore.instance
           .collection('users').doc(user.uid).collection('following').get();
+      final blockedFuture = FirebaseFirestore.instance
+          .collection('users').doc(user.uid).collection('blocked').get();
       
       // Tüm verileri bekle
-      final results = await Future.wait([userFuture, adminFuture, followingFuture]);
+      final results = await Future.wait([userFuture, adminFuture, followingFuture, blockedFuture]);
       final userDoc = results[0] as DocumentSnapshot;
       final adminDoc = results[1] as DocumentSnapshot;
       final followingSnap = results[2] as QuerySnapshot;
+      final blockedSnap = results[3] as QuerySnapshot;
       
       if (!mounted) return;
       
@@ -186,15 +201,21 @@ class _FeedScreenState extends State<FeedScreen> {
       final isAdminFromRole = userRole == 'admin';
       final isAdmin = isAdminFromCollection || isAdminFromRole;
       
+      // ✅ DEBUG: Admin durumunu logla
+      debugPrint('🔍 Admin Check: isAdminFromCollection=$isAdminFromCollection, isAdminFromRole=$isAdminFromRole, userRole=$userRole, final isAdmin=$isAdmin');
+      
       setState(() {
         _isAdmin = isAdmin;
         // ✅ Admin ise role'ü de 'admin' olarak set et (expert yetkileri için)
-        if (isAdmin && _userRole != 'admin') {
+        if (isAdmin) {
           _userRole = 'admin';
+          debugPrint('✅ Admin detected! Setting _isAdmin=true and _userRole=admin');
         }
         // Takip listesi
         _myFollowingIds = followingSnap.docs.map((d) => d.id).toList();
         _myFollowingIds.add(user.uid);
+        // Engellenen kullanıcılar
+        _blockedIds = blockedSnap.docs.map((d) => d.id).toSet();
       });
     } catch (e) {
       // Hata durumunda sessizce devam et (kullanıcı deneyimini bozmamak için)
@@ -207,11 +228,24 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
-  Future<void> _loadPosts() async {
-    if (_isLoading || !_hasMore) return;
+  /// Console'dan kopyalayıp paylaşmak için: [FEED_DEBUG] ile başlayan tüm satırları al.
+  static void _feedLog(String section, String message) {
+    final ts = DateTime.now().toIso8601String();
+    debugPrint('[FEED_DEBUG] $ts | $section | $message');
+  }
+
+  Future<void> _loadPosts({bool skipDiscoverCache = false}) async {
+    _feedLog('LOAD_POSTS', 'called: skipDiscoverCache=$skipDiscoverCache, filter=$_currentFilter, hasMore=$_hasMore, isLoading=$_isLoading');
+    if (_isLoading || !_hasMore) {
+      _feedLog('LOAD_POSTS', 'early return: loading or no more');
+      return;
+    }
     
     // ✅ OPTIMIZED: Debounce ile çoklu çağrıları önle
-    if (_loadPostsDebounce == true) return;
+    if (_loadPostsDebounce == true) {
+      _feedLog('LOAD_POSTS', 'early return: debounce');
+      return;
+    }
     _loadPostsDebounce = true;
     
     setState(() => _isLoading = true);
@@ -220,12 +254,19 @@ class _FeedScreenState extends State<FeedScreen> {
       
       // Keşfet filtresi seçiliyse backend'den akıllı feed çek
       if (_currentFilter == FeedFilter.discover) {
+        // İlk sayfa (lastDocId yok) her zaman cache atlansın: güncel postlar görünsün
+        final isFirstPage = _lastPostIdForPagination == null;
+        final skipCache = skipDiscoverCache || isFirstPage;
+        _feedLog('DISCOVER', 'request: lastDocId=$_lastPostIdForPagination, skipCache=$skipCache (skipDiscoverCache=$skipDiscoverCache, isFirstPage=$isFirstPage)');
         try {
           final result = await _discoverService.getDiscoverFeed(
             limit: 20,
             lastDocId: _lastPostIdForPagination,
+            skipCache: skipCache,
           );
           newPosts = result.posts;
+          _feedLog('DISCOVER', 'result: count=${newPosts.length}, hasMore=${result.hasMore}');
+          _feedLog('DISCOVER', 'postIds=${newPosts.map((p) => p.id).join(",")}');
           if (!result.hasMore) {
             setState(() => _hasMore = false);
           }
@@ -235,15 +276,38 @@ class _FeedScreenState extends State<FeedScreen> {
           }
         } catch (e) {
           // Backend hatası durumunda fallback olarak eski yöntemi kullan
-          debugPrint('Discover feed error, falling back to Firestore: $e');
+          _feedLog('DISCOVER', 'ERROR fallback to Firestore: $e');
           newPosts = await _postRepo.getGlobalFeed(lastDoc: _lastDocument);
+          _feedLog('FIRESTORE_FALLBACK', 'count=${newPosts.length}');
         }
       } else {
+        _feedLog('FIRESTORE', 'getGlobalFeed');
         // Takip Ettiklerim filtresi için eski yöntem (henüz implement edilmedi)
         newPosts = await _postRepo.getGlobalFeed(lastDoc: _lastDocument);
+        _feedLog('FIRESTORE', 'count=${newPosts.length}');
       }
       
       if (newPosts.isNotEmpty) {
+        // ✅ Engellenen kullanıcıların postlarını filtrele
+        final beforeBlock = newPosts.length;
+        final currentUserId = _auth.currentUser?.uid;
+        if (currentUserId != null && _blockedIds.isNotEmpty) {
+          newPosts = newPosts.where((post) {
+            // Post sahibi engellenmiş mi?
+            if (_blockedIds.contains(post.authorId)) return false;
+            // Repost yapan kullanıcı engellenmiş mi?
+            if (post.repostedByUserId != null && _blockedIds.contains(post.repostedByUserId)) {
+              return false;
+            }
+            // Bidirectional check: Post sahibi beni engellemiş mi?
+            // (Bu kontrol async olduğu için şimdilik sadece client-side blocking yapıyoruz)
+            return true;
+          }).toList();
+        }
+        if (beforeBlock != newPosts.length) {
+          _feedLog('BLOCK_FILTER', 'filtered $beforeBlock -> ${newPosts.length}');
+        }
+        
         setState(() {
           _posts.addAll(newPosts);
           // Pagination cursor'ı güncelle
@@ -251,10 +315,13 @@ class _FeedScreenState extends State<FeedScreen> {
             _lastDocument = newPosts.last.docSnapshot;
           }
         });
+        _feedLog('LOAD_POSTS', 'done: _posts.length=${_posts.length}, ids=${_posts.map((p) => p.id).join(",")}');
       } else {
+        _feedLog('LOAD_POSTS', 'newPosts empty -> hasMore=false');
         setState(() => _hasMore = false);
       }
     } catch (e) {
+      _feedLog('LOAD_POSTS', 'ERROR: $e');
       // Hata durumunda döngüyü durdur ama kullanıcıya bilgi ver
       setState(() {
         _hasMore = false;
@@ -296,7 +363,9 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
-  Future<void> _refresh() async {
+  /// [skipDiscoverCache] - true ise discover feed cache atlanır (paylaşım sonrası yeni post görünsün)
+  Future<void> _refresh({bool skipDiscoverCache = false}) async {
+    _feedLog('REFRESH', '>>> START skipDiscoverCache=$skipDiscoverCache');
     setState(() {
       _posts.clear();
       _lastDocument = null;
@@ -304,14 +373,15 @@ class _FeedScreenState extends State<FeedScreen> {
       _hasMore = true;
       _loadPostsDebounce = null;
     });
-    await _loadPosts();
+    await _loadPosts(skipDiscoverCache: skipDiscoverCache);
+    _feedLog('REFRESH', '<<< END _posts.length=${_posts.length}');
   }
 
   void _resetToHome() {
     if (_scrollController.hasClients) {
       _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
     }
-    _refresh();
+    _refresh(skipDiscoverCache: true);
   }
 
   // ✅ OPTIMIZED: Skeleton loading widget
@@ -448,10 +518,26 @@ class _FeedScreenState extends State<FeedScreen> {
 
     // 🔒 GÜVENLİK: Backend'de role kontrolü yapılacak, ama UI'da da kontrol edelim
     if (_userRole != 'expert' && _userRole != 'admin' && !_isAdmin) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Sadece uzmanlar ve adminler post paylaşabilir")),
+      AppErrorHandler.showInfo(
+        context,
+        'Sadece uzmanlar ve adminler post paylaşabilir',
       );
       return;
+    }
+
+    // ✅ ABONELİK KONTROLÜ: Expert ise aktif abonelik gerekli (Admin hariç)
+    if ((_userRole == 'expert') && !_isAdmin) {
+      final subscriptionRepo = FirestoreSubscriptionRepository();
+      final hasActiveSubscription = await subscriptionRepo.hasActiveSubscription(user.uid);
+      
+      if (!hasActiveSubscription) {
+        if (!mounted) return;
+        AppErrorHandler.showInfo(
+          context,
+          'Post paylaşmak için aktif bir uzman aboneliğiniz olmalı. Lütfen abonelik planınızı yenileyin.',
+        );
+        return;
+      }
     }
 
     // ✅ OPTİMİZASYON: Cache'den kullanıcı bilgilerini kullan (gereksiz query önle)
@@ -473,27 +559,21 @@ class _FeedScreenState extends State<FeedScreen> {
       );
       _postCtrl.clear();
       setState(() { _selectedFile = null; _fileType = null; });
-      _refresh();
+      _feedLog('POST_SENT', '>>> calling _refresh(skipDiscoverCache: true)');
+      // ✅ Paylaşım sonrası discover cache atlansın, yeni post hemen görünsün
+      await _refresh(skipDiscoverCache: true);
+      _feedLog('POST_SENT', '<<< after refresh _posts.length=${_posts.length}');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Paylaşıldı!"),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        AppErrorHandler.showSuccess(context, 'Post başarıyla paylaşıldı!');
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       if (mounted) {
-        final errorMessage = e.toString();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Paylaşım sırasında bir hata oluştu: ${errorMessage.length > 60 ? errorMessage.substring(0, 60) + "..." : errorMessage}'),
-            duration: const Duration(seconds: 4),
-            action: SnackBarAction(
-              label: 'Tekrar Dene',
-              onPressed: () => _submitPost(),
-            ),
-          ),
+        AppErrorHandler.handleError(
+          context,
+          e,
+          stackTrace: stackTrace,
+          customMessage: 'Post paylaşılırken bir hata oluştu.',
+          onRetry: () => _submitPost(),
         );
       }
     } finally {
@@ -505,30 +585,54 @@ class _FeedScreenState extends State<FeedScreen> {
 
   // 1. MENÜ TUŞU (YETKİLERE GÖRE DÜZENLENMİŞ) - ✅ KOYU MOD EKLENDİ
   Widget _buildTopMainMenu() {
-    final isExpert = _userRole == 'expert' || _userRole == 'admin';
-    final isClient = _userRole == 'client' || _userRole == null;
+    // ✅ Admin kontrolü: hem _isAdmin hem de _userRole == 'admin' kontrolü
+    // itemBuilder içinde her seferinde güncel değerleri kullan
     final themeService = ThemeService();
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return PopupMenuButton<String>(
-      icon: Icon(Icons.menu, color: isDark ? Colors.white : Colors.deepPurple),
+      key: ValueKey('menu_${_isAdmin}_${_userRole}'), // ✅ State değiştiğinde menüyü yeniden build et
+      icon: Icon(Icons.menu, color: isDark ? Colors.white : _neonGreen),
       tooltip: 'Menü',
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      onOpened: () {
+        // ✅ Menü açıldığında admin kontrolünü yeniden yap
+        final user = _auth.currentUser;
+        if (user != null && (!_isAdmin && _userRole != 'admin')) {
+          // Admin değil gibi görünüyorsa ama kontrol edelim
+          FirebaseFirestore.instance.collection('admins').doc(user.uid).get().then((adminDoc) {
+            if (adminDoc.exists && mounted) {
+              setState(() {
+                _isAdmin = true;
+                _userRole = 'admin';
+              });
+              debugPrint('✅ Admin detected on menu open!');
+            }
+          });
+        }
+      },
       onSelected: (val) {
+        // ✅ onSelected içinde de güncel değerleri kontrol et
+        final currentIsAdmin = _isAdmin || _userRole == 'admin';
+        
         switch (val) {
           case 'tests': Navigator.pushNamed(context, '/tests'); break;
           case 'solvedTests': Navigator.pushNamed(context, '/solvedTests'); break;
           case 'aiConsultations': Navigator.pushNamed(context, '/aiConsultations'); break;
           case 'analysis': Navigator.pushNamed(context, '/analysis'); break;
           case 'experts': Navigator.push(context, MaterialPageRoute(builder: (_) => const ExpertsListScreen())); break;
+          case 'groups': Navigator.pushNamed(context, '/groups'); break;
           case 'createTest': Navigator.pushNamed(context, '/createTest'); break;
           case 'expertTests': Navigator.pushNamed(context, '/expertTests'); break;
-          case 'createPost': Navigator.pushNamed(context, '/createPost').then((_) => _refresh()); break;
+          case 'createPost': Navigator.pushNamed(context, '/createPost').then((_) => _refresh(skipDiscoverCache: true)); break;
           case 'darkMode': 
             themeService.toggleTheme();
             break;
+          case 'settings': 
+            Navigator.pushNamed(context, '/settings');
+            break;
           case 'admin': 
-            if (_isAdmin) {
+            if (currentIsAdmin) {
               Navigator.pushNamed(context, '/admin');
             } else {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -542,8 +646,62 @@ class _FeedScreenState extends State<FeedScreen> {
         }
       },
       itemBuilder: (_) {
+        // ✅ itemBuilder her açıldığında güncel değerleri kullan
         final isDark = Theme.of(context).brightness == Brightness.dark;
         final items = <PopupMenuEntry<String>>[];
+        
+        // ✅ Güncel admin ve expert kontrolü - TÜM YOLLARLA KONTROL ET
+        // 1. State'ten kontrol
+        bool currentIsAdmin = _isAdmin || _userRole == 'admin';
+        // 2. Expert kontrolü: Admin aynı zamanda expert yetkilerine sahiptir
+        final currentIsExpert = _userRole == 'expert' || _userRole == 'admin' || currentIsAdmin;
+        
+        // ✅ DEBUG: Menü build edilirken admin durumunu logla
+        debugPrint('📋 Menu Builder: _isAdmin=$_isAdmin, _userRole=$_userRole, currentIsAdmin=$currentIsAdmin, currentIsExpert=$currentIsExpert');
+        
+        // ✅ ÖNEMLİ: Admin ise expert yetkilerine de sahip olmalı
+        if (currentIsAdmin && !currentIsExpert) {
+          debugPrint('⚠️ WARNING: Admin but not Expert! This should not happen. _userRole=$_userRole');
+        }
+        
+        // ✅ EĞER STATE'TE ADMIN YOK AMA KONTROL ETTİYSEK: OnOpened'da güncellenmiş olmalı
+        // Eğer hala yoksa, belki de kullanıcı gerçekten admin değil - debug log'larına bak
+        
+        // ✅ ARAMA BAR (MENÜNÜN EN ÜSTÜNDE)
+        items.add(
+          PopupMenuItem<String>(
+            enabled: false,
+            child: InkWell(
+              onTap: _openSearch,
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isDark ? _neonGreen.withOpacity(0.1) : _neonGreen.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _neonGreen.withOpacity(0.2)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.search, size: 18, color: isDark ? _neonGreen.withOpacity(0.7) : _neonGreen),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Ara...',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isDark ? _neonGreen.withOpacity(0.7) : _neonGreen,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        
+        items.add(const PopupMenuDivider());
         
         // ✅ HERKES İÇİN (Client, Expert, Admin)
         items.addAll([
@@ -551,7 +709,7 @@ class _FeedScreenState extends State<FeedScreen> {
             value: 'tests',
             child: Row(
               children: [
-                Icon(Icons.quiz_outlined, size: 20, color: Colors.deepPurple),
+                Icon(Icons.quiz_outlined, size: 20, color: _neonGreen),
                 SizedBox(width: 12),
                 Text('Test Kataloğu/Test Çöz'),
               ],
@@ -561,7 +719,7 @@ class _FeedScreenState extends State<FeedScreen> {
             value: 'solvedTests',
             child: Row(
               children: [
-                Icon(Icons.assignment_turned_in_outlined, size: 20, color: Colors.deepPurple),
+                Icon(Icons.assignment_turned_in_outlined, size: 20, color: _neonGreen),
                 SizedBox(width: 12),
                 Text('Çözdüğüm Testler'),
               ],
@@ -571,7 +729,7 @@ class _FeedScreenState extends State<FeedScreen> {
             value: 'analysis',
             child: Row(
               children: [
-                Icon(Icons.auto_awesome_outlined, size: 20, color: Colors.deepPurple),
+                Icon(Icons.auto_awesome_outlined, size: 20, color: _neonGreen),
                 SizedBox(width: 12),
                 Text('AI Analizi\'ne Danış'),
               ],
@@ -581,7 +739,7 @@ class _FeedScreenState extends State<FeedScreen> {
             value: 'aiConsultations',
             child: Row(
               children: [
-                Icon(Icons.psychology_outlined, size: 20, color: Colors.deepPurple),
+                Icon(Icons.psychology_outlined, size: 20, color: _neonGreen),
                 SizedBox(width: 12),
                 Text('AI\'a Danıştıklarım'),
               ],
@@ -591,16 +749,26 @@ class _FeedScreenState extends State<FeedScreen> {
             value: 'experts',
             child: Row(
               children: [
-                Icon(Icons.people_outline, size: 20, color: Colors.deepPurple),
+                Icon(Icons.people_outline, size: 20, color: _neonGreen),
                 SizedBox(width: 12),
                 Text('Uzmanları Keşfet'),
+              ],
+            ),
+          ),
+          const PopupMenuItem(
+            value: 'groups',
+            child: Row(
+              children: [
+                Icon(Icons.group_outlined, size: 20, color: _neonGreen),
+                SizedBox(width: 12),
+                Text('Gruplar'),
               ],
             ),
           ),
         ]);
         
         // ✅ EXPERT/ADMIN İÇİN
-        if (isExpert) {
+        if (currentIsExpert) {
           items.addAll([
             const PopupMenuDivider(),
             const PopupMenuItem(
@@ -649,10 +817,20 @@ class _FeedScreenState extends State<FeedScreen> {
               ],
             ),
           ),
+          const PopupMenuItem(
+            value: 'settings',
+            child: Row(
+              children: [
+                Icon(Icons.settings_outlined, size: 20, color: Colors.grey),
+                SizedBox(width: 12),
+                Text('Ayarlar'),
+              ],
+            ),
+          ),
         ]);
         
         // ✅ ADMIN PANELİ (SADECE ADMIN İÇİN)
-        if (_isAdmin) {
+        if (currentIsAdmin) {
           items.addAll([
             const PopupMenuDivider(),
             PopupMenuItem(
@@ -693,19 +871,19 @@ class _FeedScreenState extends State<FeedScreen> {
         height: 32,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
-          color: isDark ? Colors.deepPurple.withOpacity(0.1) : Colors.deepPurple.withOpacity(0.06),
+          color: isDark ? _neonGreen.withOpacity(0.1) : _neonGreen.withOpacity(0.06),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.deepPurple.withOpacity(0.2)),
+          border: Border.all(color: _neonGreen.withOpacity(0.2)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.search, size: 16, color: isDark ? Colors.deepPurple.shade300 : Colors.deepPurple),
+            Icon(Icons.search, size: 16, color: isDark ? _neonGreen.withOpacity(0.7) : _neonGreen),
             const SizedBox(width: 6),
             Flexible(
               child: Text(
                 'Ara...',
-                style: TextStyle(fontSize: 12, color: isDark ? Colors.deepPurple.shade300 : Colors.deepPurple),
+                style: TextStyle(fontSize: 12, color: isDark ? _neonGreen.withOpacity(0.7) : _neonGreen),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -727,12 +905,12 @@ class _FeedScreenState extends State<FeedScreen> {
       tooltip: 'Filtre',
       onSelected: (val) {
         setState(() => _currentFilter = val);
-        if (val == FeedFilter.discover) _refresh();
+        if (val == FeedFilter.discover) _refresh(skipDiscoverCache: true);
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.deepPurple,
+          color: _neonGreen,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
@@ -777,15 +955,15 @@ class _FeedScreenState extends State<FeedScreen> {
               margin: const EdgeInsets.only(bottom: 8),
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: isDark ? Colors.deepPurple.shade900.withOpacity(0.3) : Colors.deepPurple.shade50,
+                color: isDark ? _neonGreen.withOpacity(0.15) : _neonGreen.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: isDark ? Colors.deepPurple.shade700 : Colors.deepPurple.shade100),
+                border: Border.all(color: isDark ? _neonGreen.withOpacity(0.4) : _neonGreen.withOpacity(0.3)),
               ),
               child: Row(
                 children: [
-                  Icon(_fileType == 'image' ? Icons.image : Icons.insert_drive_file, color: Colors.deepPurple),
+                  Icon(_fileType == 'image' ? Icons.image : Icons.insert_drive_file, color: _neonGreen),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(path.basename(_selectedFile!.path), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: isDark ? Colors.deepPurple.shade200 : Colors.deepPurple))),
+                  Expanded(child: Text(path.basename(_selectedFile!.path), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: isDark ? _neonGreen.withOpacity(0.8) : _neonGreen))),
                   GestureDetector(
                     onTap: () => setState(() { _selectedFile = null; _fileType = null; }),
                     child: const Icon(Icons.close, size: 18, color: Colors.red),
@@ -801,9 +979,9 @@ class _FeedScreenState extends State<FeedScreen> {
                 padding: const EdgeInsets.only(top: 4),
                 child: CircleAvatar(
                   radius: 18,
-                  backgroundColor: isDark ? Colors.deepPurple.shade800 : Colors.deepPurple.shade50,
+                  backgroundColor: isDark ? _neonGreen.withOpacity(0.2) : _neonGreen.withOpacity(0.1),
                   backgroundImage: _userPhoto != null ? NetworkImage(_userPhoto!) : null,
-                  child: _userPhoto == null ? Text(_userName.isNotEmpty ? _userName[0] : '?', style: TextStyle(color: isDark ? Colors.deepPurple.shade200 : Colors.deepPurple, fontWeight: FontWeight.bold)) : null,
+                  child: _userPhoto == null ? Text(_userName.isNotEmpty ? _userName[0] : '?', style: TextStyle(color: isDark ? _neonGreen.withOpacity(0.8) : _neonGreen, fontWeight: FontWeight.bold)) : null,
                 ),
               ),
               const SizedBox(width: 10),
@@ -825,22 +1003,22 @@ class _FeedScreenState extends State<FeedScreen> {
                     ),
                     // Alt Butonlar
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         IconButton(
-                          icon: Icon(Icons.attach_file, color: isDark ? Colors.deepPurple.shade300 : Colors.deepPurple, size: 20),
+                          icon: Icon(Icons.attach_file, color: isDark ? _neonGreen.withOpacity(0.7) : _neonGreen, size: 20),
                           onPressed: _isPosting ? null : _pickFile,
                           tooltip: 'Dosya/Resim Ekle',
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
                         ),
-
+                        const SizedBox(width: 8),
                         _isPosting
                             ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
                             : ElevatedButton(
                           onPressed: _submitPost,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.deepPurple,
+                            backgroundColor: _neonGreen,
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
@@ -891,15 +1069,15 @@ class _FeedScreenState extends State<FeedScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Image.asset(
-                        'assets/images/psych_catalog_logo.png',
+                        'assets/images/psych_catalog_logo.jpeg',
                         height: 28,
-                        errorBuilder: (_,__,___) => Icon(Icons.psychology, color: isDark ? Colors.deepPurple : _brandNavy, size: 20),
+                        errorBuilder: (_,__,___) => Icon(Icons.psychology, color: isDark ? _neonGreen : _brandNavy, size: 20),
                       ),
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(
                           'Psych Catalog',
-                          style: TextStyle(color: isDark ? Colors.white : _brandNavy, fontWeight: FontWeight.w900, fontSize: 14),
+                          style: TextStyle(color: const Color(0xFF0D1B3D), fontWeight: FontWeight.w900, fontSize: 14),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -908,23 +1086,19 @@ class _FeedScreenState extends State<FeedScreen> {
                 ),
               ),
               const SizedBox(width: 4),
-              // 2. MENÜ BUTONU
+              // 2. MENÜ BUTONU (içinde arama barı var)
               _buildTopMainMenu(),
-              const SizedBox(width: 4),
-              // 3. ARAMA BUTONU (Flexible)
-              Flexible(
-                flex: 2,
-                child: _buildSearchBarCompact(),
-              ),
-              const SizedBox(width: 4),
-              // 4. FİLTRE BUTONU
-              _buildExploreMenu(),
             ],
           ),
         ),
         actions: [
+          // Filtre butonu (Keşfet/Takip) - Mesajın solunda
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: _buildExploreMenu(),
+          ),
           IconButton(
-            icon: Icon(Icons.mail_outline, color: isDark ? Colors.white : Colors.deepPurple),
+            icon: Icon(Icons.mail_outline, color: isDark ? Colors.white : _neonGreen),
             onPressed: () => Navigator.pushNamed(context, '/chatList'),
           ),
           PopupMenuButton<String>(
@@ -933,7 +1107,7 @@ class _FeedScreenState extends State<FeedScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: CircleAvatar(
                 radius: 18,
-                backgroundColor: isDark ? Colors.deepPurple.shade800 : Colors.deepPurple.shade100,
+                backgroundColor: isDark ? _neonGreen.withOpacity(0.2) : _neonGreen.withOpacity(0.15),
                 backgroundImage: _userPhoto != null && _userPhoto!.isNotEmpty 
                     ? NetworkImage(_userPhoto!) 
                     : null,
@@ -942,7 +1116,7 @@ class _FeedScreenState extends State<FeedScreen> {
                         _userName.isNotEmpty ? _userName[0].toUpperCase() : '?',
                         style: TextStyle(
                           fontSize: 16,
-                          color: isDark ? Colors.deepPurple.shade200 : Colors.deepPurple,
+                          color: isDark ? _neonGreen.withOpacity(0.8) : _neonGreen,
                           fontWeight: FontWeight.bold,
                         ),
                       )
@@ -970,8 +1144,8 @@ class _FeedScreenState extends State<FeedScreen> {
           // 2. LİSTE
           Expanded(
             child: RefreshIndicator(
-              onRefresh: _refresh,
-              color: Colors.deepPurple,
+              onRefresh: () => _refresh(skipDiscoverCache: true),
+              color: _neonGreen,
               child: _posts.isEmpty && _isLoading
                   ? _buildSkeletonLoading(isDark)
                   : _posts.isEmpty
@@ -1038,6 +1212,10 @@ class _FeedScreenState extends State<FeedScreen> {
                               post: _posts[index],
                               myFollowingIds: _myFollowingIds,
                               currentUserRole: _userRole,
+                              onPostCreated: () => _refresh(skipDiscoverCache: true), // ✅ Alıntı sonrası cache atlansın
+                              onPostDeleted: (postId) {
+                                if (mounted) setState(() => _posts.removeWhere((p) => p.id == postId));
+                              },
                             );
                           },
                         ),

@@ -1,0 +1,18 @@
+// --- ABONELİK SİSTEMİ KURALLARI (expert_subscriptions/{subscriptionId}) ---
+match /expert_subscriptions/{subscriptionId} {
+  // Okuma: Sadece kendi aboneliğini görebilir veya Admin
+  allow read: if isAuthenticated() 
+                && (isOwner(resource.data.userId) || isAdminInCollection() || isAdmin());
+  
+  // Oluşturma: Sadece kendi adına abonelik oluşturabilir (backend'den veya kullanıcıdan)
+  allow create: if isAuthenticated()
+                && request.resource.data.userId == request.auth.uid
+                && request.resource.data.plan is string
+                && request.resource.data.status is string;
+  
+  // Güncelleme: Sadece Admin (durum değişiklikleri için)
+  allow update: if isAdminInCollection() || isAdmin();
+  
+  // Silme: İzin yok (soft delete kullanılmalı)
+  allow delete: if false;
+}

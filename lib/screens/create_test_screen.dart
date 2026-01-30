@@ -2,12 +2,17 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path/path.dart' as path;
 
 import '../repositories/firestore_test_repository.dart';
+import '../repositories/firestore_subscription_repository.dart';
+import '../utils/rate_limiter.dart';
+import '../services/analytics_service.dart';
+import '../utils/error_handler.dart';
 
 // ✅ Soru modeli
 class QuestionItem {
@@ -45,14 +50,14 @@ class QuestionItem {
   }
 }
 
-class CreateTestScreen extends StatefulWidget {
+class CreateTestScreen extends ConsumerStatefulWidget {
   const CreateTestScreen({super.key});
 
   @override
-  State<CreateTestScreen> createState() => _CreateTestScreenState();
+  ConsumerState<CreateTestScreen> createState() => _CreateTestScreenState();
 }
 
-class _CreateTestScreenState extends State<CreateTestScreen> {
+class _CreateTestScreenState extends ConsumerState<CreateTestScreen> {
   final _testRepo = FirestoreTestRepository();
 
   final _titleCtrl = TextEditingController();
@@ -76,6 +81,8 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
   @override
   void initState() {
     super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('create_test');
     _loadRoleAndName();
     // ✅ İlk soruyu ekle
     _questions.add(QuestionItem(text: '', type: 'scale'));
@@ -182,8 +189,24 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
         if (!mounted) return;
         setState(() {
           _error = 'Sadece uzmanlar ve adminler test oluşturabilir.';
+          _loading = false;
         });
         return;
+      }
+
+      // ✅ ABONELİK KONTROLÜ: Expert ise aktif abonelik gerekli (Admin hariç)
+      if (_isExpert && !_isAdmin) {
+        final subscriptionRepo = FirestoreSubscriptionRepository();
+        final hasActiveSubscription = await subscriptionRepo.hasActiveSubscription(user.uid);
+        
+        if (!hasActiveSubscription) {
+          if (!mounted) return;
+          setState(() {
+            _error = 'Test oluşturmak için aktif bir aboneliğiniz olmalıdır. Lütfen abonelik planınızı yenileyin.';
+            _loading = false;
+          });
+          return;
+        }
       }
 
       // ✅ GÜVENLİK: Input sanitization ve validation
@@ -334,6 +357,28 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
           .reduce((a, b) => a.value > b.value ? a : b)
           .key;
 
+      // ✅ RATE LIMITING: Test oluşturma için rate limit
+      final canCreate = RateLimiter.canPerformAction(
+        'test_creation_${user.uid}',
+        cooldown: const Duration(minutes: 5),
+        maxAttempts: 5,
+        resetWindow: const Duration(minutes: 10),
+      );
+      
+      if (!canCreate) {
+        if (!mounted) return;
+        setState(() {
+          _error = 'Çok fazla test oluşturma denemesi yaptınız. Lütfen birkaç dakika bekleyin.';
+          _loading = false;
+        });
+        return;
+      }
+      
+      RateLimiter.recordAction(
+        'test_creation_${user.uid}',
+        resetWindow: const Duration(minutes: 10),
+      );
+      
       await _testRepo.createTest(
         title: sanitizedTitle,
         description: sanitizedDescription,
@@ -343,6 +388,12 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
         expertName: _expertName,
       );
 
+      // ✅ ANALYTICS: Test oluşturuldu event'i
+      await AnalyticsService.logEvent('test_created', parameters: {
+        'test_id': 'new',
+        'question_count': validQuestions.length,
+      });
+
       if (!mounted) return;
       setState(() {
         _success = 'Test kaydedildi 🎉';
@@ -351,9 +402,24 @@ class _CreateTestScreenState extends State<CreateTestScreen> {
         _questions.clear();
         _questions.add(QuestionItem(text: '', type: 'scale'));
       });
-    } catch (e) {
+    } on RateLimitException catch (e) {
       if (!mounted) return;
-      // ✅ Kullanıcı dostu hata mesajları
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    } catch (e, stackTrace) {
+      if (!mounted) return;
+      
+      // ✅ ERROR HANDLING: AppErrorHandler kullan
+      AppErrorHandler.handleError(
+        context,
+        e,
+        stackTrace: stackTrace,
+        customMessage: 'Test kaydedilemedi',
+      );
+      
+      // ✅ Kullanıcı dostu hata mesajları (fallback)
       String errorMessage = 'Test kaydedilemedi';
       final errorStr = e.toString();
       

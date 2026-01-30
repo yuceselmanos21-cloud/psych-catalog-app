@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../repositories/firestore_test_repository.dart';
+import '../widgets/empty_state_widget.dart';
 
 class TestsListScreen extends StatefulWidget {
   const TestsListScreen({super.key});
@@ -87,6 +88,7 @@ class _TestsListScreenState extends State<TestsListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Testler'),
@@ -115,23 +117,20 @@ class _TestsListScreenState extends State<TestsListScreen> {
                 }
 
                 if (snapshot.hasError) {
-                  return const Center(
-                    child: Text('Testler yüklenirken hata oluştu.'),
+                  return EmptyStates.error(
+                    message: 'Testler yüklenirken hata oluştu.',
+                    onRetry: () => setState(() {}),
                   );
                 }
 
                 if (!snapshot.hasData || snapshot.data == null) {
-                  return const Center(
-                    child: Text('Henüz hiç test yok.'),
-                  );
+                  return EmptyStates.noTests();
                 }
 
                 final allDocs = snapshot.data!.docs;
 
                 if (allDocs.isEmpty) {
-                  return const Center(
-                    child: Text('Henüz hiç test yok.'),
-                  );
+                  return EmptyStates.noTests();
                 }
 
                 final filteredDocs = allDocs.where((doc) {
@@ -140,9 +139,7 @@ class _TestsListScreenState extends State<TestsListScreen> {
                 }).toList();
 
                 if (filteredDocs.isEmpty) {
-                  return const Center(
-                    child: Text('Aramaya uygun test bulunamadı.'),
-                  );
+                  return EmptyStates.noSearchResults();
                 }
 
                 // ✅ küçük stabilite: tarih sırası garanti

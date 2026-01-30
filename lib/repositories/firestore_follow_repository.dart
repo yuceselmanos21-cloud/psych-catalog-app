@@ -54,6 +54,22 @@ class FirestoreFollowRepository implements FollowRepository {
     return _followingCol(userId).snapshots().map((q) => q.size);
   }
 
+  /// Following IDs stream (Set of user IDs that userId is following)
+  @override
+  Stream<Set<String>> watchFollowingIds(String userId) {
+    return _followingCol(userId).snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) => doc.id).toSet();
+    });
+  }
+
+  /// Followers IDs stream (Set of user IDs that follow userId)
+  @override
+  Stream<Set<String>> watchFollowersIds(String userId) {
+    return _followersCol(userId).snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) => doc.id).toSet();
+    });
+  }
+
   /// Follow atomically via batch
   @override
   Future<void> follow({

@@ -4,7 +4,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:path/path.dart' as path;
 import '../models/post_model.dart';
-import '../models/reply_model.dart';
 import '../utils/mention_parser.dart';
 import 'post_repository.dart';
 

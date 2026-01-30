@@ -1,14 +1,50 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:intl/intl.dart';
+import '../services/analytics_service.dart';
+import '../widgets/empty_state_widget.dart';
 import 'ai_consultation_detail_screen.dart';
 
-class AIConsultationsScreen extends StatelessWidget {
+class AIConsultationsScreen extends StatefulWidget {
   final bool hideAppBar;
   
   const AIConsultationsScreen({super.key, this.hideAppBar = false});
+
+  @override
+  State<AIConsultationsScreen> createState() => _AIConsultationsScreenState();
+}
+
+class _AIConsultationsScreenState extends State<AIConsultationsScreen> {
+  String _searchQuery = '';
+  String _displaySearchQuery = ''; // ✅ PERFORMANCE: Debounced search query
+  Timer? _debounceTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('ai_consultations');
+  }
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String value) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() {
+          _displaySearchQuery = value.toLowerCase().trim();
+        });
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +74,7 @@ class AIConsultationsScreen extends StatelessWidget {
         ),
       );
       
-      if (hideAppBar) {
+      if (widget.hideAppBar) {
         return content;
       }
       
@@ -57,93 +93,75 @@ class AIConsultationsScreen extends StatelessWidget {
         // StreamBuilder otomatik yenilenecek
         await Future.delayed(const Duration(milliseconds: 500));
       },
-      child: StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('aiConsultations')
-              .where('userId', isEqualTo: userId)
-              .orderBy('createdAt', descending: true)
-              .snapshots(),
-          builder: (context, snapshot) {
+      child: Column(
+        children: [
+          // Arama Barı
+          if (!widget.hideAppBar)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: TextField(
+                onChanged: (value) {
+                  setState(() => _searchQuery = value);
+                  _onSearchChanged(value);
+                },
+                decoration: InputDecoration(
+                  hintText: 'Danışma ara...',
+                  prefixIcon: const Icon(Icons.search),
+                  filled: true,
+                  fillColor: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+              ),
+            ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('aiConsultations')
+                    .where('userId', isEqualTo: userId)
+                    .orderBy('createdAt', descending: true)
+                    .snapshots(),
+                builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return _buildSkeletonLoading(isDark);
             }
 
             if (snapshot.hasError) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 64,
-                      color: Colors.red.shade300,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Bir hata oluştu',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${snapshot.error}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.grey.shade500 : Colors.grey.shade500,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
+              return EmptyStates.error(
+                message: snapshot.error.toString(),
+                onRetry: () => setState(() {}),
               );
             }
 
-            final consultations = snapshot.data?.docs ?? [];
+            final allConsultations = snapshot.data?.docs ?? [];
+            
+            // ✅ PERFORMANCE: Arama filtresi (debounced)
+            final consultations = _displaySearchQuery.isEmpty
+                ? allConsultations
+                : allConsultations.where((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+                    final text = (data['text'] ?? '').toString().toLowerCase();
+                    final analysis = (data['analysis'] ?? '').toString().toLowerCase();
+                    return text.contains(_displaySearchQuery) || analysis.contains(_displaySearchQuery);
+                  }).toList();
 
             if (consultations.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.deepPurple.shade900.withOpacity(0.2)
-                            : Colors.deepPurple.shade50,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.psychology_outlined,
-                        size: 64,
-                        color: isDark ? Colors.deepPurple.shade300 : Colors.deepPurple.shade700,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'Henüz AI danışmanız yok',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 32),
-                      child: Text(
-                        'AI analiz ekranından danışma başlatabilirsiniz',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ],
-                ),
+              return EmptyStateWidget(
+                icon: Icons.psychology_outlined,
+                title: _displaySearchQuery.isEmpty 
+                    ? 'Henüz AI danışmanız yok'
+                    : 'Arama sonucu bulunamadı',
+                subtitle: _displaySearchQuery.isEmpty
+                    ? 'AI analiz ekranından danışma başlatabilirsiniz'
+                    : 'Arama kriterlerinizi değiştirmeyi deneyin',
+                iconColor: isDark ? Colors.deepPurple.shade300 : Colors.deepPurple.shade700,
+                actionLabel: _displaySearchQuery.isEmpty ? 'AI Analiz' : null,
+                onAction: _displaySearchQuery.isEmpty
+                    ? () => Navigator.pushNamed(context, '/analysis')
+                    : null,
               );
             }
 
@@ -173,11 +191,14 @@ class AIConsultationsScreen extends StatelessWidget {
                 );
               },
             );
-          },
+                },
+              ),
+            ),
+          ],
         ),
       );
     
-    if (hideAppBar) {
+    if (widget.hideAppBar) {
       return body;
     }
     

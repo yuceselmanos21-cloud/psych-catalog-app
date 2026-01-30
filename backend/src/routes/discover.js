@@ -1,7 +1,6 @@
 import express from 'express';
 import { getDb } from '../config/firebase.js';
 import { logger } from '../utils/logger.js';
-import { Timestamp } from 'firebase-admin/firestore';
 
 // ✅ OPTIMIZED: Simple in-memory cache (5 dakika TTL)
 const cache = new Map();
@@ -37,29 +36,32 @@ const router = express.Router();
 
 /**
  * POST /api/discover/feed
- * Akıllı keşfet feed'i döndürür
- * 
- * Algoritma:
- * 1. Admin boost (yüksek öncelik)
- * 2. Engagement score (like, comment, repost)
- * 3. Recency (yeni içerikler)
- * 4. Diversity (aynı kullanıcıdan çok fazla post gösterme)
- * 5. Herkesin şansı olmalı (randomization)
- * 
+ * Keşfet feed'i – tarihe göre sıralı (en yeni en üstte).
+ *
  * Body:
  * - limit: number (varsayılan: 20, maksimum: 50)
  * - lastDocId: string (pagination için)
  */
 router.post('/feed', async (req, res) => {
   try {
-    const { limit = 20, lastDocId } = req.body;
+    const { limit = 20, lastDocId, skipCache = false } = req.body;
     const userId = req.user?.uid;
 
-    // ✅ OPTIMIZED: Cache kontrolü (sadece ilk sayfa için)
-    if (!lastDocId) {
-      const cacheKey = getCacheKey(userId, null);
+    // Console kopyalama: [FEED_DEBUG] ile başlayan satırları topla
+    const ts = new Date().toISOString();
+    console.log(`[FEED_DEBUG] ${ts} | DISCOVER_REQUEST | limit=${limit} lastDocId=${lastDocId ?? 'null'} skipCache=${skipCache} userId=${userId ?? 'null'}`);
+
+    // İlk sayfa (lastDocId yok): Cache KULLANMA – her zaman Firestore'dan taze veri
+    // Böylece yeni atılan postlar hemen görünür; client skipCache göndermese de çalışır
+    const isFirstPage = !lastDocId;
+    if (isFirstPage) {
+      // İlk sayfa için cache okuma/yazma yok – doğrudan DB'ye git
+    } else if (!skipCache) {
+      const cacheKey = getCacheKey(userId, lastDocId);
       const cached = getCachedFeed(cacheKey);
       if (cached) {
+        const cachedCount = (cached.posts || []).length;
+        console.log(`[FEED_DEBUG] ${new Date().toISOString()} | DISCOVER_CACHE_HIT | postsCount=${cachedCount}`);
         logger.info('Discover feed served from cache', { userId });
         return res.json(cached);
       }
@@ -68,17 +70,12 @@ router.post('/feed', async (req, res) => {
     const searchLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
     const db = getDb();
 
-    // 1. Son 7 günün postlarını çek (recency için)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const sevenDaysAgoTimestamp = Timestamp.fromDate(sevenDaysAgo);
-    
+    // Tarihe göre sırala: en yeni en üstte (createdAt desc)
     let queryRef = db.collection('posts')
       .where('isComment', '==', false)
       .where('deleted', '==', false)
-      .where('createdAt', '>=', sevenDaysAgoTimestamp)
       .orderBy('createdAt', 'desc')
-      .limit(200); // Daha fazla çek, sonra score'a göre sırala
+      .limit(searchLimit + 1); // pagination için +1
 
     // Pagination için lastDocId varsa o noktadan devam et
     if (lastDocId) {
@@ -90,55 +87,28 @@ router.post('/feed', async (req, res) => {
 
     const snapshot = await queryRef.get();
     const allDocs = snapshot.docs;
-
-    if (allDocs.length === 0) {
-      // Son 7 günde post yoksa, tüm postları çek
-      let fallbackQuery = db.collection('posts')
-        .where('isComment', '==', false)
-        .where('deleted', '==', false)
-        .orderBy('createdAt', 'desc')
-        .limit(200);
-
-      if (lastDocId) {
-        const lastDoc = await db.collection('posts').doc(lastDocId).get();
-        if (lastDoc.exists) {
-          fallbackQuery = fallbackQuery.startAfter(lastDoc);
-        }
-      }
-
-      const fallbackSnapshot = await fallbackQuery.get();
-      const fallbackDocs = fallbackSnapshot.docs;
-      
-      // Score hesapla ve sırala
-      const scoredPosts = await _scoreAndSortPosts(fallbackDocs, userId, db);
-      const finalPosts = _applyDiversity(scoredPosts, searchLimit);
-      
-      return res.json({
-        posts: finalPosts,
-        hasMore: fallbackDocs.length >= 200,
-        totalResults: finalPosts.length,
-      });
-    }
-
-    // Score hesapla ve sırala
-    const scoredPosts = await _scoreAndSortPosts(allDocs, userId, db);
-    const finalPosts = _applyDiversity(scoredPosts, searchLimit);
+    const hasMore = allDocs.length > searchLimit;
+    const docsToReturn = hasMore ? allDocs.slice(0, searchLimit) : allDocs;
+    const finalPosts = docsToReturn.map((doc) => _formatPost(doc, doc.data()));
 
     logger.info('Discover feed generated', {
       resultsCount: finalPosts.length,
-      hasMore: allDocs.length >= 200,
+      hasMore,
       userId,
     });
 
     const response = {
       posts: finalPosts,
-      hasMore: allDocs.length >= 200,
+      hasMore,
       totalResults: finalPosts.length,
     };
 
-    // ✅ OPTIMIZED: Cache'e kaydet (sadece ilk sayfa için)
-    if (!lastDocId) {
-      const cacheKey = getCacheKey(userId, null);
+    const postIds = (finalPosts || []).map((p) => p.id).join(',');
+    console.log(`[FEED_DEBUG] ${new Date().toISOString()} | DISCOVER_RESPONSE | postsCount=${finalPosts.length} hasMore=${response.hasMore} postIds=${postIds}`);
+
+    // İlk sayfa cache'e yazma (ilk sayfa her zaman taze; cache sadece pagination için kalsın)
+    if (lastDocId && !skipCache) {
+      const cacheKey = getCacheKey(userId, lastDocId);
       setCachedFeed(cacheKey, response);
     }
 
@@ -148,115 +118,6 @@ router.post('/feed', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-/**
- * Post'ları score'a göre sıralar
- */
-async function _scoreAndSortPosts(docs, userId, db) {
-  const scoredPosts = [];
-
-  for (const doc of docs) {
-    const data = doc.data();
-    const authorId = data.authorId;
-    const authorRole = data.authorRole;
-
-    // 1. Admin Boost (yüksek öncelik)
-    let adminBoost = 0;
-    if (authorRole === 'admin') {
-      adminBoost = 1000; // Admin postları en üstte
-    }
-
-    // 2. Engagement Score
-    const stats = data.stats || {};
-    const likeCount = stats.likeCount || 0;
-    const replyCount = stats.replyCount || 0;
-    const repostCount = stats.repostCount || 0;
-    const quoteCount = stats.quoteCount || 0;
-    
-    // Engagement hesaplama (ağırlıklı)
-    const engagementScore = 
-      (likeCount * 1) +           // Like: 1 puan
-      (replyCount * 3) +          // Yorum: 3 puan (daha değerli)
-      (repostCount * 2) +         // Repost: 2 puan
-      (quoteCount * 4);           // Quote: 4 puan (en değerli)
-
-    // 3. Recency Score (yeni içerikler daha yüksek)
-    const createdAt = data.createdAt?.toDate?.() || new Date(data.createdAt);
-    const now = new Date();
-    const hoursAgo = (now - createdAt) / (1000 * 60 * 60);
-    
-    // Son 24 saat: 100 puan, son 7 gün: 50 puan, daha eski: 10 puan
-    let recencyScore = 10;
-    if (hoursAgo < 24) {
-      recencyScore = 100;
-    } else if (hoursAgo < 168) { // 7 gün
-      recencyScore = 50;
-    }
-
-    // 4. Expert Boost (hafif öncelik)
-    let expertBoost = 0;
-    if (authorRole === 'expert') {
-      expertBoost = 20;
-    }
-
-    // 5. Toplam Score
-    const totalScore = adminBoost + engagementScore + recencyScore + expertBoost;
-
-    // 6. Randomization (herkesin şansı olsun)
-    // Score'a %10-20 arası random ekle (düşük score'lu postların da şansı olsun)
-    const randomFactor = Math.random() * (totalScore * 0.2);
-    const finalScore = totalScore + randomFactor;
-
-    scoredPosts.push({
-      doc,
-      data,
-      score: finalScore,
-      authorId,
-      authorRole,
-      engagementScore,
-      recencyScore,
-      adminBoost,
-      expertBoost,
-    });
-  }
-
-  // Score'a göre sırala (yüksekten düşüğe)
-  scoredPosts.sort((a, b) => b.score - a.score);
-
-  return scoredPosts;
-}
-
-/**
- * Diversity uygula: Aynı kullanıcıdan çok fazla post gösterme
- */
-function _applyDiversity(scoredPosts, limit) {
-  const authorCounts = new Map();
-  const finalPosts = [];
-  const maxPostsPerAuthor = Math.ceil(limit * 0.3); // Her kullanıcıdan maksimum %30
-
-  for (const item of scoredPosts) {
-    const authorId = item.authorId;
-    const currentCount = authorCounts.get(authorId) || 0;
-
-    // Admin postları her zaman dahil et
-    if (item.authorRole === 'admin') {
-      finalPosts.push(_formatPost(item.doc, item.data));
-      continue;
-    }
-
-    // Diğer kullanıcılar için diversity uygula
-    if (currentCount < maxPostsPerAuthor) {
-      finalPosts.push(_formatPost(item.doc, item.data));
-      authorCounts.set(authorId, currentCount + 1);
-    }
-
-    if (finalPosts.length >= limit) {
-      break;
-    }
-  }
-
-  return finalPosts;
-}
 
 /**
  * Post'u API formatına çevir

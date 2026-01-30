@@ -1,11 +1,23 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../repositories/firestore_test_repository.dart';
+import '../services/analytics_service.dart';
+import '../widgets/empty_state_widget.dart';
 
-class SolvedTestsScreen extends StatelessWidget {
+class SolvedTestsScreen extends StatefulWidget {
   const SolvedTestsScreen({super.key});
+
+  @override
+  State<SolvedTestsScreen> createState() => _SolvedTestsScreenState();
+}
+
+class _SolvedTestsScreenState extends State<SolvedTestsScreen> {
+  String _searchQuery = '';
+  String _displaySearchQuery = ''; // ✅ PERFORMANCE: Debounced search query
+  Timer? _debounceTimer;
 
   static String _formatDateTime(DateTime dt) {
     return '${dt.day.toString().padLeft(2, '0')}.'
@@ -15,9 +27,34 @@ class SolvedTestsScreen extends StatelessWidget {
   }
 
   @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String value) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        setState(() {
+          _displaySearchQuery = value.toLowerCase().trim();
+        });
+      }
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('solved_tests');
+  }
+
+  @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     final testRepo = FirestoreTestRepository();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     if (user == null) {
       return const Scaffold(
@@ -29,28 +66,63 @@ class SolvedTestsScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Çözdüğüm Testler'),
       ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: testRepo.watchSolvedTestsByUser(user.uid),
-        builder: (context, snapshot) {
+      body: Column(
+        children: [
+          // Arama Barı
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              onChanged: (value) {
+                setState(() => _searchQuery = value);
+                _onSearchChanged(value);
+              },
+              decoration: InputDecoration(
+                hintText: 'Test ara...',
+                prefixIcon: const Icon(Icons.search),
+                filled: true,
+                fillColor: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              ),
+            ),
+          ),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+              stream: testRepo.watchSolvedTestsByUser(user.uid),
+              builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
           if (snapshot.hasError) {
-            return const Center(
-              child: Text('Çözdüğün testler yüklenirken hata oluştu.'),
+            return EmptyStates.error(
+              message: 'Çözdüğün testler yüklenirken hata oluştu.',
+              onRetry: () => setState(() {}),
             );
           }
 
           final data = snapshot.data;
           if (data == null || data.docs.isEmpty) {
-            return const Center(child: Text('Henüz çözülmüş test yok.'));
+            return EmptyStates.noSolvedTests();
           }
 
           // Repo tarafı sıralıyor olsa da, createdAt eksik durumlarına karşı
           // extra güvenlik için client-side sıralama bırakıyoruz.
-          final docs = data.docs.toList();
-          docs.sort((a, b) {
+          final allDocs = data.docs.toList();
+          
+          // ✅ PERFORMANCE: Arama filtresi (debounced)
+          final filteredDocs = _displaySearchQuery.isEmpty
+              ? allDocs
+              : allDocs.where((doc) {
+                  final d = doc.data();
+                  final title = d['testTitle']?.toString().toLowerCase() ?? '';
+                  return title.contains(_displaySearchQuery);
+                }).toList();
+          
+          filteredDocs.sort((a, b) {
             final aTs = a.data()['createdAt'] as Timestamp?;
             final bTs = b.data()['createdAt'] as Timestamp?;
             final aTime =
@@ -60,10 +132,19 @@ class SolvedTestsScreen extends StatelessWidget {
             return bTime.compareTo(aTime);
           });
 
+          if (filteredDocs.isEmpty) {
+            return Center(
+              child: Text(
+                _displaySearchQuery.isEmpty ? 'Henüz çözülmüş test yok.' : 'Arama sonucu bulunamadı.',
+                style: TextStyle(color: isDark ? Colors.grey.shade400 : Colors.grey.shade600),
+              ),
+            );
+          }
+
           return ListView.builder(
-            itemCount: docs.length,
+            itemCount: filteredDocs.length,
             itemBuilder: (context, index) {
-              final doc = docs[index];
+              final doc = filteredDocs[index];
               final d = doc.data();
 
               final title = d['testTitle']?.toString().trim();
@@ -179,7 +260,10 @@ class SolvedTestsScreen extends StatelessWidget {
               );
             },
           );
-        },
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

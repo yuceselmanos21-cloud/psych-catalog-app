@@ -259,9 +259,52 @@ service cloud.firestore {
       allow delete: if false; // Şikayetler silinemez, sadece kapatılabilir
     }
 
+    // 10d. EXPERT ABONELİKLERİ (expert_subscriptions/{subscriptionId})
+    match /expert_subscriptions/{subscriptionId} {
+      // Okuma: Sadece kendi aboneliğini görebilir veya Admin
+      // ✅ Query için: resource null olabilir, bu yüzden kontrol et
+      allow read: if isAuthenticated() 
+                    && (isAdminInCollection() || isAdmin() || 
+                        (resource != null && isOwner(resource.data.userId)));
+      
+      // Oluşturma: Sadece kendi adına abonelik oluşturabilir
+      allow create: if isAuthenticated()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.plan is string
+                    && request.resource.data.status is string;
+      
+      // Güncelleme: Sadece Admin (durum değişiklikleri için)
+      allow update: if isAdminInCollection() || isAdmin();
+      
+      // Silme: İzin yok (soft delete kullanılmalı)
+      allow delete: if false;
+    }
+
+    // 10e. EXPERT BAŞVURULARI (expert_applications/{applicationId})
+    match /expert_applications/{applicationId} {
+      // Okuma: Sadece kendi başvurusunu görebilir veya Admin
+      allow read: if isAuthenticated() 
+                    && (isOwner(resource.data.uid) || isAdminInCollection() || isAdmin());
+      
+      // Oluşturma: Herkes kendi adına başvuru yapabilir
+      allow create: if isAuthenticated()
+                    && request.resource.data.uid == request.auth.uid
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.profession is string
+                    && request.resource.data.selectedPlan is string;
+      
+      // Güncelleme: Sadece Admin (onay/ret işlemleri için)
+      allow update: if isAdminInCollection() || isAdmin();
+      
+      // Silme: İzin yok
+      allow delete: if false;
+    }
+
     // 5. TEST TANIMLARI (Sadece Expert/Admin Yönetir, Admin her şeyi yapabilir)
+    // ✅ ABONELİK KONTROLÜ: Expert'lerin aktif aboneliği olmalı (Admin hariç)
     match /tests/{testId} {
       allow read: if isAuthenticated();
+      // Oluşturma: Expert ise aktif abonelik kontrolü yapılacak (client-side veya Cloud Function)
       allow create: if isExpertOrAdmin() || isAdminInCollection() || request.auth.token.role == 'admin';
       allow update: if isExpertOrAdmin() || isAdminInCollection() || request.auth.token.role == 'admin';
       allow delete: if isExpertOrAdmin() || isAdminInCollection() || request.auth.token.role == 'admin';
@@ -349,6 +392,14 @@ service cloud.firestore {
       allow write: if isAuthenticated() && isOwner(followerId);
     }
 
+    // 10c. ENGELLEME SİSTEMİ (users/{userId}/blocked/{blockedUserId})
+    match /users/{userId}/blocked/{blockedUserId} {
+      // ✅ Okuma: Sadece kendi engellediği kullanıcıları görebilir
+      allow read: if isAuthenticated() && isOwner(userId);
+      // ✅ Yazma: Sadece kendi engelleme listesini yönetebilir
+      allow write: if isAuthenticated() && isOwner(userId);
+    }
+
     // 11. BOOKMARK SİSTEMİ (users/{userId}/bookmarks/{postId})
     match /users/{userId}/bookmarks/{postId} {
       allow read: if isAuthenticated() && isOwner(userId);
@@ -392,6 +443,55 @@ service cloud.firestore {
         allow delete: if isAuthenticated() &&
                        request.auth.uid == resource.data.senderId;
       }
+    }
+
+    // 13. GRUPLAR SİSTEMİ
+    match /groups/{groupId} {
+      // ✅ Okuma: Herkes (authenticated) public grupları görebilir
+      // Query için: resource null olabilir, bu yüzden kontrol et
+      allow read: if isAuthenticated() && (
+        // Public grup ise herkes görebilir
+        resource == null || // Query durumu
+        resource.data.isPublic == true ||
+        // Veya kullanıcı grup üyesi ise
+        (resource.data.members is list && request.auth.uid in resource.data.members) ||
+        // Veya admin ise
+        isAdminInCollection() || 
+        isAdmin()
+      );
+      
+      // ✅ Oluşturma: Herkes kendi grubunu oluşturabilir
+      allow create: if isAuthenticated() &&
+                     request.resource.data.createdBy == request.auth.uid &&
+                     request.resource.data.name is string &&
+                     request.resource.data.name.size() > 0 &&
+                     request.resource.data.name.size() < 100 &&
+                     request.resource.data.members is list &&
+                     request.resource.data.members.size() > 0 &&
+                     request.resource.data.members[0] == request.auth.uid; // İlk üye oluşturan olmalı
+      
+      // ✅ Güncelleme: Grup sahibi, moderatörler veya admin güncelleyebilir
+      allow update: if isAuthenticated() && (
+        // Grup sahibi
+        isOwner(resource.data.createdBy) ||
+        // Moderator ise
+        (resource.data.moderators is list && request.auth.uid in resource.data.moderators) ||
+        // Admin ise
+        isAdminInCollection() || 
+        isAdmin() ||
+        // Üye ekleme/çıkarma (members array güncellemesi)
+        (request.resource.data.members is list &&
+         request.resource.data.createdBy == resource.data.createdBy &&
+         request.resource.data.name == resource.data.name &&
+         request.resource.data.isPublic == resource.data.isPublic)
+      );
+      
+      // ✅ Silme: Grup sahibi veya admin silebilir
+      allow delete: if isAuthenticated() && (
+        isOwner(resource.data.createdBy) ||
+        isAdminInCollection() || 
+        isAdmin()
+      );
     }
   }
 }

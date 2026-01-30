@@ -8,6 +8,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:path/path.dart' as path;
 import '../services/analysis_service.dart';
+import '../services/analytics_service.dart';
 import '../widgets/friendly_error_widget.dart';
 import 'ai_consultation_detail_screen.dart';
 
@@ -36,6 +37,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   @override
   void initState() {
     super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('analysis');
     _textCtrl.addListener(() {
       setState(() {}); // Karakter sayacı için
     });

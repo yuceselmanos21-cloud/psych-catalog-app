@@ -24,6 +24,18 @@ if (result.error) {
   console.log('✅ .env file exists:', existsSync(envPath));
 }
 
+// ✅ Proxy ayarlarını temizle (yanlış proxy ayarları Firestore bağlantısını engelleyebilir)
+if (process.env.http_proxy && process.env.http_proxy.includes('127.0.0.1:9')) {
+  console.warn('⚠️  Invalid proxy detected, disabling...');
+  delete process.env.http_proxy;
+  delete process.env.HTTP_PROXY;
+}
+if (process.env.https_proxy && process.env.https_proxy.includes('127.0.0.1:9')) {
+  console.warn('⚠️  Invalid proxy detected, disabling...');
+  delete process.env.https_proxy;
+  delete process.env.HTTPS_PROXY;
+}
+
 // ✅ Hemen GEMINI_API_KEY kontrolü (dotenv.config sonrası)
 console.log('🔵 Immediate GEMINI_API_KEY check after dotenv.config:');
 console.log('  - process.env.GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? `SET (${process.env.GEMINI_API_KEY.length} chars)` : 'NOT SET');

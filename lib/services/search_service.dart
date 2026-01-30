@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/post_model.dart';
@@ -182,9 +183,11 @@ class DiscoverService {
   /// 
   /// [limit] - Sonuç sayısı (varsayılan: 20, maksimum: 50)
   /// [lastDocId] - Pagination için son doküman ID'si
+  /// [skipCache] - true ise backend cache kullanmaz (paylaşım sonrası refresh için)
   Future<DiscoverFeedResult> getDiscoverFeed({
     int limit = 20,
     String? lastDocId,
+    bool skipCache = false,
   }) async {
     try {
       final token = await _getIdToken();
@@ -192,33 +195,42 @@ class DiscoverService {
         throw Exception('User not authenticated');
       }
 
+      final body = <String, dynamic>{
+        'limit': limit,
+        if (lastDocId != null) 'lastDocId': lastDocId,
+        if (skipCache) 'skipCache': true,
+      };
+      final url = '$_baseUrl/discover/feed';
+      // Console kopyalama: [FEED_DEBUG] ile başlayan satırları topla
+      debugPrint('[FEED_DEBUG] ${DateTime.now().toIso8601String()} | API_REQUEST | url=$url body=$body');
       final response = await http.post(
-        Uri.parse('$_baseUrl/discover/feed'),
+        Uri.parse(url),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({
-          'limit': limit,
-          if (lastDocId != null) 'lastDocId': lastDocId,
-        }),
+        body: jsonEncode(body),
       );
+      debugPrint('[FEED_DEBUG] ${DateTime.now().toIso8601String()} | API_RESPONSE | status=${response.statusCode} bodyLength=${response.body.length}');
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final postsList = data['posts'] as List<dynamic>;
-        final posts = postsList.map((p) => Post.fromJson(p)).toList();
-        
+        final postsList = data['posts'] as List<dynamic>? ?? [];
+        final posts = postsList.map((p) => Post.fromJson(p as Map<String, dynamic>)).toList();
+        final ids = posts.map((p) => p.id).join(',');
+        debugPrint('[FEED_DEBUG] ${DateTime.now().toIso8601String()} | API_PARSED | postsCount=${posts.length} hasMore=${data['hasMore']} postIds=$ids');
         return DiscoverFeedResult(
           posts: posts,
           hasMore: data['hasMore'] as bool? ?? false,
           totalResults: data['totalResults'] as int? ?? posts.length,
         );
       } else {
+        debugPrint('[FEED_DEBUG] ${DateTime.now().toIso8601String()} | API_ERROR | body=${response.body}');
         final error = jsonDecode(response.body) as Map<String, dynamic>;
         throw Exception(error['error'] ?? 'Discover feed failed');
       }
     } catch (e) {
+      debugPrint('[FEED_DEBUG] ${DateTime.now().toIso8601String()} | API_EXCEPTION | $e');
       throw Exception('Discover feed error: ${e.toString()}');
     }
   }

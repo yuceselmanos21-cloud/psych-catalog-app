@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
+import '../config/app_config.dart';
 import 'test_repository.dart';
 
 class FirestoreTestRepository implements TestRepository {
@@ -81,15 +82,18 @@ class FirestoreTestRepository implements TestRepository {
   Future<void> _triggerBackendAnalysis(String testId, String docId) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        debugPrint('❌ Kullanıcı oturum açmamış');
+        return;
+      }
       
       final idToken = await user.getIdToken();
-      // ✅ Environment variable'dan al, yoksa default kullan
-      const apiUrl = String.fromEnvironment('API_URL');
-      final baseUrl = apiUrl.isNotEmpty ? apiUrl : 'http://localhost:3000';
+      // ✅ AppConfig'den API URL'i al
+      String baseUrl = AppConfig.apiUrl;
       
       debugPrint('🔵 Backend analiz isteği gönderiliyor: $baseUrl/api/test/analyze');
       debugPrint('🔵 testId: $testId, docId: $docId');
+      debugPrint('🔵 API URL: $baseUrl');
       
       // ✅ Flutter web için retry mekanizması
       http.Response? response;
@@ -131,20 +135,32 @@ class FirestoreTestRepository implements TestRepository {
           retries--;
           if (retries > 0) {
             debugPrint('⚠️ İstek başarısız (deneme $attempt): ${e.toString()}');
+            debugPrint('⚠️ URL: $baseUrl/api/test/analyze');
             debugPrint('⚠️ Tekrar deneniyor... ($retries kaldı)');
             await Future.delayed(const Duration(seconds: 2)); // ✅ 2 saniye bekle
           } else {
             debugPrint('❌ Tüm denemeler başarısız: ${e.toString()}');
+            debugPrint('❌ Son hata: ${lastError?.toString()}');
+            debugPrint('❌ Backend URL kontrolü: $baseUrl/api/test/analyze');
+            debugPrint('❌ Backend çalışıyor mu kontrol edin: $baseUrl/health');
           }
         }
       }
       
       if (response == null || response.statusCode < 200 || response.statusCode >= 300) {
-        throw lastError ?? Exception('Backend isteği başarısız oldu');
+        final errorMsg = lastError?.toString() ?? 'Backend isteği başarısız oldu';
+        debugPrint('❌ Backend analiz isteği başarısız: $errorMsg');
+        debugPrint('❌ Response: ${response?.statusCode} - ${response?.body}');
+        // Hata durumunda Firestore'da status 'pending' kalacak
+        // Kullanıcı bekleme ekranında görecek
+        throw Exception(errorMsg);
       }
     } catch (e) {
       debugPrint('❌ Backend analiz tetikleme hatası: $e');
-      // Hata durumunda sessizce devam et
+      debugPrint('❌ Backend URL: ${AppConfig.apiUrl}');
+      debugPrint('❌ Backend çalışıyor mu kontrol edin: ${AppConfig.apiUrl}/health');
+      // Hata durumunda sessizce devam et - Firestore'da pending kalacak
+      // Kullanıcı bekleme ekranında görecek ve manuel olarak tekrar deneyebilir
     }
   }
 

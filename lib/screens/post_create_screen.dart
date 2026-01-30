@@ -6,8 +6,11 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:path/path.dart' as path;
 import '../repositories/firestore_post_repository.dart';
+import '../repositories/firestore_subscription_repository.dart';
+import '../services/analytics_service.dart';
 import '../widgets/mention_autocomplete.dart';
 import '../utils/mention_parser.dart';
+import '../utils/error_handler.dart';
 
 class PostCreateScreen extends StatefulWidget {
   const PostCreateScreen({super.key});
@@ -43,6 +46,8 @@ class _PostCreateScreenState extends State<PostCreateScreen> {
   @override
   void initState() {
     super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('post_create');
     _loadFullUserProfile();
     _textCtrl.addListener(_onTextChanged);
   }
@@ -180,12 +185,30 @@ class _PostCreateScreenState extends State<PostCreateScreen> {
   Future<void> _send() async {
     final text = _textCtrl.text.trim();
     if (text.isEmpty && _selectedFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('İçerik boş olamaz.')));
+      AppErrorHandler.showInfo(context, 'İçerik boş olamaz.');
       return;
     }
 
     final user = _user;
-    if (user == null) return;
+    if (user == null) {
+      AppErrorHandler.showInfo(context, 'Oturum bulunamadı.');
+      return;
+    }
+
+    // ✅ ABONELİK KONTROLÜ: Expert ise aktif abonelik gerekli (Admin hariç)
+    if (_authorRole == 'expert' && _authorRole != 'admin') {
+      final subscriptionRepo = FirestoreSubscriptionRepository();
+      final hasActiveSubscription = await subscriptionRepo.hasActiveSubscription(user.uid);
+      
+      if (!hasActiveSubscription) {
+        if (!mounted) return;
+        AppErrorHandler.showInfo(
+          context,
+          'Post paylaşmak için aktif bir uzman aboneliğiniz olmalı. Lütfen abonelik planınızı yenileyin.',
+        );
+        return;
+      }
+    }
 
     setState(() => _sending = true);
 
@@ -203,11 +226,18 @@ class _PostCreateScreenState extends State<PostCreateScreen> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Paylaşıldı!')));
+        AppErrorHandler.showSuccess(context, 'Post başarıyla paylaşıldı!');
         Navigator.pop(context);
       }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Hata: $e')));
+    } catch (e, stackTrace) {
+      if (mounted) {
+        AppErrorHandler.handleError(
+          context,
+          e,
+          stackTrace: stackTrace,
+          customMessage: 'Post paylaşılırken bir hata oluştu.',
+        );
+      }
     } finally {
       if (mounted) setState(() => _sending = false);
     }

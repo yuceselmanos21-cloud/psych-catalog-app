@@ -3,6 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../../repositories/firestore_admin_repository.dart';
+import '../../repositories/firestore_subscription_repository.dart';
+import '../../models/subscription_model.dart';
+import '../../services/analytics_service.dart';
 import '../post_detail_screen.dart';
 import '../expert_public_profile_screen.dart';
 import '../public_client_profile_screen.dart';
@@ -19,6 +22,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   // -----------------------------
   // COLLECTION NAMES (adjust here)
   // -----------------------------
+  static const Color _brandNavy = Color(0xFF0D1B3D);
   static const String kUsersCol = 'users';
   static const String kAdminsCol = 'admins';
   static const String kPostsCol = 'posts';
@@ -493,13 +497,26 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           SetOptions(merge: true),
         );
 
-        // Kullanıcı rolünü expert yap
+        // Başvuru verilerini al
+        final appData = appSnap.data() as Map<String, dynamic>;
+        final selectedPlan = appData['selectedPlan'] as String? ?? 'expert'; // Tek plan: 499₺/ay
+        final profession = appData['profession'] as String? ?? '';
+        final specialties = appData['specialties'] as String? ?? '';
+        final about = appData['about'] as String? ?? '';
+        final education = appData['education'] as String? ?? '';
+
+        // Kullanıcı rolünü expert yap ve bilgileri güncelle
         tx.set(
           userRef,
           {
             kUserRoleField: 'expert',
+            'expertStatus': 'approved',
             'expertApprovedAt': FieldValue.serverTimestamp(),
             'expertApprovedBy': _myUid ?? '',
+            'profession': profession,
+            'specialties': specialties,
+            'about': about,
+            'education': education,
             // Otomatik ban kaldır
             kUserBannedField: false,
             'updatedAt': FieldValue.serverTimestamp(),
@@ -508,9 +525,22 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         );
       });
 
+      // ✅ ABONELİK BAŞLAT: Admin onayladıktan sonra aylık abonelik başlat (Tek Plan: 499₺/ay)
+      // Subscription plan'ı belirle (Tek plan: expert - 499₺/ay)
+      final selectedPlan = SubscriptionPlan.expert;
+
+      // Aylık abonelik başlat (payment entegrasyonu eklendiğinde ödeme alınacak)
+      final subscriptionRepo = FirestoreSubscriptionRepository();
+      await subscriptionRepo.createSubscription(
+        userId: applicantUid,
+        plan: selectedPlan,
+        startDate: DateTime.now(),
+        endDate: DateTime.now().add(const Duration(days: 30)), // Aylık
+      );
+
       if (mounted) {
         setState(() => _isLoading = false);
-        _snack('Başvuru onaylandı. Kullanıcı artık uzman.');
+        _snack('Başvuru onaylandı. Kullanıcı artık uzman ve aylık abonelik başlatıldı.');
       }
     } catch (e) {
       if (mounted) {
@@ -711,7 +741,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget _buildNotAllowed() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(title: const Text('Admin Panel')),
+      appBar: AppBar(
+        title: const Text('Admin Panel'),
+        titleTextStyle: TextStyle(
+          color: isDark ? Colors.white : _brandNavy,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
+        iconTheme: IconThemeData(
+          color: isDark ? Colors.white : _brandNavy,
+        ),
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -755,19 +795,31 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           Scaffold(
             appBar: AppBar(
               title: const Text('Admin Panel'),
-              bottom: const TabBar(
-            isScrollable: true,
-            tabs: [
-              Tab(text: 'Kullanıcılar'),
-              Tab(text: 'Başvurular'),
-              Tab(text: 'Şikayetler'),
-              Tab(text: 'Postlar'),
-              Tab(text: 'Yorumlar'),
-              Tab(text: 'Testler'),
-              Tab(text: 'Adminler'),
-            ],
-          ),
-        ),
+              titleTextStyle: TextStyle(
+                color: isDark ? Colors.white : _brandNavy,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+              iconTheme: IconThemeData(
+                color: isDark ? Colors.white : _brandNavy,
+              ),
+              bottom: TabBar(
+                isScrollable: true,
+                labelColor: isDark ? Colors.white : _brandNavy,
+                unselectedLabelColor: isDark ? Colors.white70 : Colors.grey.shade600,
+                indicatorColor: isDark ? Colors.white : _brandNavy,
+                indicatorWeight: 3,
+                tabs: const [
+                  Tab(text: 'Kullanıcılar', icon: Icon(Icons.people)),
+                  Tab(text: 'Başvurular', icon: Icon(Icons.description)),
+                  Tab(text: 'Şikayetler', icon: Icon(Icons.flag)),
+                  Tab(text: 'Postlar', icon: Icon(Icons.article)),
+                  Tab(text: 'Yorumlar', icon: Icon(Icons.comment)),
+                  Tab(text: 'Testler', icon: Icon(Icons.quiz)),
+                  Tab(text: 'Adminler', icon: Icon(Icons.admin_panel_settings)),
+                ],
+              ),
+            ),
         body: TabBarView(
           children: [
             // 1) USERS (overflow fix: no ListTile.trailing Column)

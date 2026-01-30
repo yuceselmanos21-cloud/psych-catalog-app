@@ -16,6 +16,8 @@ class PostCard extends StatefulWidget {
   final String? currentUserRole; // RBAC için
   final bool hideCommentButton; // Post detail ekranında yorum butonunu gizle
   final bool disableTap; // ✅ PostCard'ın kendi onTap'ini devre dışı bırak
+  final VoidCallback? onPostCreated; // ✅ Post oluşturulduktan sonra callback
+  final void Function(String postId)? onPostDeleted; // ✅ Post silindikten sonra feed/liste güncellensin
 
   const PostCard({
     super.key,
@@ -24,6 +26,8 @@ class PostCard extends StatefulWidget {
     this.currentUserRole,
     this.hideCommentButton = false,
     this.disableTap = false, // ✅ Default olarak false
+    this.onPostCreated, // ✅ Post oluşturulduktan sonra callback
+    this.onPostDeleted,
   });
 
   @override
@@ -35,6 +39,8 @@ class _PostCardState extends State<PostCard> {
   final FirestorePostRepository _postRepo = FirestorePostRepository.instance;
   final FirestoreReportRepository _reportRepo = FirestoreReportRepository();
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  // ✅ Koyu neon yeşil renk
+  static const Color _neonGreen = Color(0xFF00CC00);
 
   bool _isReposting = false;
   bool _isBookmarking = false;
@@ -68,15 +74,21 @@ class _PostCardState extends State<PostCard> {
 
     // ✅ TWITTER BENZERİ: Eğer repost ise (alıntı değilse), orijinal postu göster
     if (widget.post.isRepost && !widget.post.isQuote) {
-      return _buildRepostCard(context, currentUid);
+      return RepaintBoundary(
+        child: _buildRepostCard(context, currentUid),
+      );
     }
     
     // ✅ TWITTER BENZERİ: Eğer alıntı ise, tam post olarak göster (menü dahil)
     if (widget.post.isQuote) {
-      return _buildQuotePostCard(context, currentUid);
+      return RepaintBoundary(
+        child: _buildQuotePostCard(context, currentUid),
+      );
     }
 
-    return _buildNormalPostCard(context, currentUid);
+    return RepaintBoundary(
+      child: _buildNormalPostCard(context, currentUid),
+    );
   }
 
   // Normal post kartı - ✅ KOYU MOD DESTEĞİ
@@ -140,14 +152,14 @@ class _PostCardState extends State<PostCard> {
                     child: CircleAvatar(
                   radius: 20,
                   backgroundColor: isExpert 
-                      ? (isDark ? Colors.deepPurple.shade800 : Colors.deepPurple.shade50)
+                      ? (isDark ? _neonGreen.withOpacity(0.3) : _neonGreen.withOpacity(0.1))
                       : (isDark ? Colors.grey.shade700 : Colors.grey.shade200),
                   child: Text(
                     authorName.isNotEmpty ? authorName[0].toUpperCase() : '?',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       color: isExpert 
-                          ? (isDark ? Colors.deepPurple.shade200 : Colors.deepPurple)
+                          ? (isDark ? _neonGreen.withOpacity(0.8) : _neonGreen)
                           : (isDark ? Colors.grey.shade300 : Colors.grey.shade700),
                         ),
                     ),
@@ -192,7 +204,7 @@ class _PostCardState extends State<PostCard> {
                                 style: TextStyle(
                                   fontWeight: FontWeight.w500,
                                   fontSize: 13,
-                                  color: Colors.deepPurple,
+                                  color: _neonGreen,
                                 ),
                               ),
                                 // "Düzenledi" etiketi
@@ -231,7 +243,7 @@ class _PostCardState extends State<PostCard> {
                                         text: '@$rootPostAuthorUsername',
                                         style: TextStyle(
                                           fontSize: 11,
-                                          color: Colors.deepPurple,
+                                          color: _neonGreen,
                                           fontWeight: FontWeight.w600,
                                           fontStyle: FontStyle.italic,
                                         ),
@@ -273,7 +285,7 @@ class _PostCardState extends State<PostCard> {
                         style: TextStyle(
                           fontSize: 12,
                           color: isExpert 
-                              ? Colors.deepPurple 
+                              ? _neonGreen 
                               : (isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                           fontWeight: FontWeight.w500,
                         ),
@@ -390,13 +402,13 @@ class _PostCardState extends State<PostCard> {
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             color: isDark 
-                                ? Colors.deepPurple.shade900.withOpacity(0.2)
-                                : Colors.deepPurple.shade50.withOpacity(0.6),
+                                ? _neonGreen.withOpacity(0.15)
+                                : _neonGreen.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
                               color: isDark 
-                                  ? Colors.deepPurple.shade800.withOpacity(0.3)
-                                  : Colors.deepPurple.shade200.withOpacity(0.5),
+                                  ? _neonGreen.withOpacity(0.3)
+                                  : _neonGreen.withOpacity(0.4),
                               width: 1,
                             ),
                           ),
@@ -406,7 +418,7 @@ class _PostCardState extends State<PostCard> {
                               Icon(
                                 Icons.chat_bubble_outline,
                                 size: 18,
-                                color: Colors.deepPurple.shade400,
+                                color: _neonGreen.withOpacity(0.9),
                               ),
                               const SizedBox(width: 10),
                               Expanded(
@@ -425,7 +437,7 @@ class _PostCardState extends State<PostCard> {
                                           TextSpan(
                                             text: '@$authorUsername ',
                                             style: TextStyle(
-                                              color: Colors.deepPurple,
+                                              color: _neonGreen,
                                               fontWeight: FontWeight.w700,
                                             ),
                                             recognizer: TapGestureRecognizer()
@@ -528,6 +540,7 @@ class _PostCardState extends State<PostCard> {
           // ✅ TWITTER BENZERİ: Orijinal post (gömülü, hafif gri arka plan, border)
           // ✅ Repost'tan post detail'e gidilebilir
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            key: ValueKey('repost_${widget.post.repostOfPostId}'),
             stream: _postRepo.watchPost(widget.post.repostOfPostId!),
             builder: (context, snapshot) {
               if (!snapshot.hasData || !snapshot.data!.exists) return const SizedBox.shrink();
@@ -654,14 +667,14 @@ class _PostCardState extends State<PostCard> {
                         child: CircleAvatar(
                           radius: 20,
                           backgroundColor: isExpert 
-                              ? (isDark ? Colors.deepPurple.shade800 : Colors.deepPurple.shade50)
+                              ? (isDark ? _neonGreen.withOpacity(0.3) : _neonGreen.withOpacity(0.1))
                               : (isDark ? Colors.grey.shade700 : Colors.grey.shade200),
                           child: Text(
                             authorName.isNotEmpty ? authorName[0].toUpperCase() : '?',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               color: isExpert 
-                                  ? (isDark ? Colors.deepPurple.shade200 : Colors.deepPurple)
+                                  ? (isDark ? _neonGreen.withOpacity(0.8) : _neonGreen)
                                   : (isDark ? Colors.grey.shade300 : Colors.grey.shade700),
                             ),
                           ),
@@ -703,7 +716,7 @@ class _PostCardState extends State<PostCard> {
                                         style: TextStyle(
                                           fontWeight: FontWeight.w500,
                                           fontSize: 13,
-                                          color: Colors.deepPurple,
+                                          color: _neonGreen,
                                         ),
                                       ),
                                     if (widget.post.editedAt != null)
@@ -724,7 +737,7 @@ class _PostCardState extends State<PostCard> {
                               style: TextStyle(
                                 fontSize: 12,
                                 color: isExpert 
-                                    ? Colors.deepPurple 
+                                    ? _neonGreen 
                                     : (isDark ? Colors.grey.shade400 : Colors.grey.shade600),
                                 fontWeight: FontWeight.w500,
                     ),
@@ -896,7 +909,7 @@ class _PostCardState extends State<PostCard> {
               child: CircleAvatar(
                 radius: 18, // Twitter benzeri küçük avatar
                 backgroundColor: (authorRole == 'expert' || authorRole == 'admin') 
-                    ? (isDark ? Colors.deepPurple.shade800 : Colors.deepPurple.shade50)
+                    ? (isDark ? _neonGreen.withOpacity(0.3) : _neonGreen.withOpacity(0.1))
                     : (isDark ? Colors.grey.shade700 : Colors.grey.shade200),
                 child: Text(
                   authorName.isNotEmpty ? authorName[0].toUpperCase() : '?',
@@ -904,7 +917,7 @@ class _PostCardState extends State<PostCard> {
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                     color: (authorRole == 'expert' || authorRole == 'admin') 
-                        ? (isDark ? Colors.deepPurple.shade200 : Colors.deepPurple)
+                        ? (isDark ? _neonGreen.withOpacity(0.8) : _neonGreen)
                         : (isDark ? Colors.grey.shade300 : Colors.grey.shade700),
                   ),
                 ),
@@ -949,7 +962,7 @@ class _PostCardState extends State<PostCard> {
                                     text: ' @$authorUsername',
                                     style: TextStyle(
                                       fontSize: 15,
-                                      color: Colors.deepPurple,
+                                      color: _neonGreen,
                                       height: 1.2,
                                     ),
                                   ),
@@ -990,7 +1003,7 @@ class _PostCardState extends State<PostCard> {
                                         text: '@$rootPostAuthorUsername',
                                         style: TextStyle(
                                           fontSize: 11,
-                                          color: Colors.deepPurple,
+                                          color: _neonGreen,
                                           fontWeight: FontWeight.w600,
                                           fontStyle: FontStyle.italic,
                                         ),
@@ -1118,6 +1131,7 @@ class _PostCardState extends State<PostCard> {
               children: [
         // ✅ Yorum - Gerçek yorum sayısını göster (silinmemiş yorumlar)
         StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          key: ValueKey('comments_${post.id}'),
           stream: post.isComment 
               ? _postRepo.getCommentsForComment(post.id)
               : _postRepo.watchAllCommentsForPost(post.id),
@@ -1149,7 +1163,7 @@ class _PostCardState extends State<PostCard> {
             return _embeddedActionButton(
               icon: Icons.chat_bubble_outline,
               value: actualReplyCount > 0 ? '$actualReplyCount' : '',
-              color: _canComment ? Colors.deepPurple : Colors.grey.shade300,
+              color: _canComment ? _neonGreen : Colors.grey.shade300,
               onTap: () => Navigator.pushNamed(context, '/postDetail', arguments: {'postId': post.id}),
               onValueTap: actualReplyCount > 0
                   ? () => Navigator.pushNamed(context, '/postDetail', arguments: {'postId': post.id})
@@ -1168,7 +1182,7 @@ class _PostCardState extends State<PostCard> {
               return _embeddedActionButton(
                 icon: Icons.repeat,
                 value: totalRepostQuote > 0 ? '$totalRepostQuote' : '',
-                color: isReposted ? Colors.deepPurple : Colors.deepPurple.shade300,
+                color: isReposted ? _neonGreen : _neonGreen.withOpacity(0.7),
                 onTap: () => _showRepostOptionsForPost(context, post.id, isReposted: isReposted),
                 onValueTap: totalRepostQuote > 0
                     ? () => Navigator.pushNamed(context, '/repostsQuotes', arguments: post.id)
@@ -1191,7 +1205,7 @@ class _PostCardState extends State<PostCard> {
         _embeddedActionButton(
           icon: isLiked ? Icons.favorite : Icons.favorite_border,
           value: likeCount > 0 ? '$likeCount' : '',
-          color: isLiked ? Colors.red : Colors.deepPurple,
+          color: isLiked ? Colors.red : _neonGreen,
                   onTap: () {
             if (currentUid != null) {
               _postRepo.toggleLike(postId: post.id, userId: currentUid);
@@ -1205,7 +1219,7 @@ class _PostCardState extends State<PostCard> {
         _embeddedActionButton(
           icon: isBookmarked ? Icons.bookmark : Icons.bookmark_border,
           value: '',
-          color: isBookmarked ? Colors.deepPurple : Colors.deepPurple.shade300,
+          color: isBookmarked ? _neonGreen : _neonGreen.withOpacity(0.7),
           onTap: () {
             if (currentUid != null && !_isBookmarking) {
               setState(() => _isBookmarking = true);
@@ -1470,6 +1484,8 @@ class _PostCardState extends State<PostCard> {
                     Navigator.pop(ctx);
                     // ✅ UI'ı güncelle
                     setState(() {});
+                    // ✅ Feed'i refresh et
+                    widget.onPostCreated?.call();
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Alıntı paylaşıldı')),
                     );
@@ -1561,7 +1577,7 @@ class _PostCardState extends State<PostCard> {
                       Icon(
               widget.post.mediaType == 'video' ? Icons.play_circle_fill : Icons.insert_drive_file,
               size: 30,
-              color: Colors.deepPurple,
+              color: _neonGreen,
                       ),
                       const SizedBox(width: 10),
                         Expanded(
@@ -1707,6 +1723,7 @@ class _PostCardState extends State<PostCard> {
         if (!widget.hideCommentButton)
           // ✅ Gerçek yorum sayısını göster (silinmemiş yorumlar)
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            key: ValueKey('comments_detail_${widget.post.id}'),
             stream: widget.post.isComment 
                 ? _postRepo.getCommentsForComment(widget.post.id)
                 : _postRepo.watchAllCommentsForPost(widget.post.id),
@@ -1738,7 +1755,7 @@ class _PostCardState extends State<PostCard> {
               return _actionButton(
                 icon: Icons.chat_bubble_outline,
                 value: actualReplyCount > 0 ? '$actualReplyCount' : '',
-                color: _canComment ? Colors.deepPurple : Colors.grey.shade300,
+                color: _canComment ? _neonGreen : Colors.grey.shade300,
                 onTap: () => Navigator.pushNamed(context, '/postDetail', arguments: {'postId': widget.post.id}),
                 onValueTap: actualReplyCount > 0
                     ? () => Navigator.pushNamed(context, '/postDetail', arguments: {'postId': widget.post.id})
@@ -1755,7 +1772,7 @@ class _PostCardState extends State<PostCard> {
               return _actionButton(
                   icon: Icons.repeat,
                 value: totalRepostQuote > 0 ? '$totalRepostQuote' : '',
-                color: isReposted ? Colors.deepPurple : Colors.deepPurple.shade300,
+                color: isReposted ? _neonGreen : _neonGreen.withOpacity(0.7),
                 onTap: () => _showRepostOptions(context, isReposted: isReposted),
                 onValueTap: totalRepostQuote > 0
                     ? () => Navigator.pushNamed(context, '/repostsQuotes', arguments: widget.post.id)
@@ -1779,7 +1796,7 @@ class _PostCardState extends State<PostCard> {
                 _actionButton(
                   icon: isLiked ? Icons.favorite : Icons.favorite_border,
           value: likeCount > 0 ? '$likeCount' : '',
-                  color: isLiked ? Colors.red : Colors.deepPurple,
+                  color: isLiked ? Colors.red : _neonGreen,
                   onTap: () {
             if (currentUid != null) {
               // ✅ OPTIMISTIC UPDATE: Immediately update UI
@@ -1819,7 +1836,7 @@ class _PostCardState extends State<PostCard> {
                 _actionButton(
           icon: isBookmarked ? Icons.bookmark : Icons.bookmark_border,
                   value: '',
-          color: isBookmarked ? Colors.deepPurple : Colors.deepPurple.shade300,
+          color: isBookmarked ? _neonGreen : _neonGreen.withOpacity(0.7),
           onTap: () {
             if (currentUid != null && !_isBookmarking) {
               // ✅ OPTIMISTIC UPDATE: Immediately update UI
@@ -2128,6 +2145,8 @@ class _PostCardState extends State<PostCard> {
                     Navigator.pop(ctx);
                     // ✅ UI'ı güncelle
                     setState(() {});
+                    // ✅ Feed'i refresh et
+                    widget.onPostCreated?.call();
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Alıntı paylaşıldı')),
                     );
@@ -2230,7 +2249,10 @@ class _PostCardState extends State<PostCard> {
                 
                 if (mounted) {
                   Navigator.pop(ctx);
-                  
+                  // ✅ Feed/liste UI güncellemesi: ana post silindiyse callback ile listeden kaldır
+                  if (!isComment) {
+                    widget.onPostDeleted?.call(postId);
+                  }
                   // ✅ Eğer yorum ise, post detail ekranından geri git
                   if (isComment) {
                     Navigator.pop(context);
@@ -2389,13 +2411,13 @@ class _PostCardState extends State<PostCard> {
                       return ListTile(
                         leading: CircleAvatar(
                           backgroundColor: (userRole == 'expert' || userRole == 'admin')
-                              ? Colors.deepPurple.shade50
+                              ? _neonGreen.withOpacity(0.1)
                               : Colors.grey.shade200,
                           child: Text(
                             userName.isNotEmpty ? userName[0].toUpperCase() : '?',
                             style: TextStyle(
                               color: (userRole == 'expert' || userRole == 'admin')
-                                  ? Colors.deepPurple
+                                  ? _neonGreen
                                   : Colors.grey.shade700,
                             ),
                           ),

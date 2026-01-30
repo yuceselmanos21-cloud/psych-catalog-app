@@ -8,6 +8,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import '../repositories/firestore_post_repository.dart';
 import '../models/post_model.dart';
 import '../widgets/post_card.dart';
+import '../services/analytics_service.dart';
 
 class PostDetailScreen extends StatefulWidget {
   final String postId;
@@ -55,6 +56,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   void initState() {
     super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('post_detail');
     _currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
     _loadUserData();
   }

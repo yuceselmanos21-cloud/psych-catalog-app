@@ -12,6 +12,12 @@ abstract class FollowRepository {
   /// userId'nin toplam takip ettiği kişi sayısı
   Stream<int> watchFollowingCount(String userId);
 
+  /// userId'nin takip ettiği kişilerin ID'lerini döndürür
+  Stream<Set<String>> watchFollowingIds(String userId);
+
+  /// userId'nin takipçilerinin ID'lerini döndürür
+  Stream<Set<String>> watchFollowersIds(String userId);
+
   Future<void> follow({
     required String currentUserId,
     required String expertId,

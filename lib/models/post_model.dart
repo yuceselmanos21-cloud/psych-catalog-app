@@ -142,11 +142,10 @@ class Post {
     }
 
     // Backend'den gelen stats Map formatında
-    Map<String, dynamic> statsMap = json['stats'] ?? {};
-    if (statsMap is Map) {
-      statsMap = Map<String, dynamic>.from(statsMap);
-    } else {
-      statsMap = {};
+    final statsData = json['stats'];
+    Map<String, dynamic> statsMap = {};
+    if (statsData is Map) {
+      statsMap = Map<String, dynamic>.from(statsData);
     }
 
     return Post(

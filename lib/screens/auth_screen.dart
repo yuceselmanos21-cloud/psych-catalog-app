@@ -462,14 +462,23 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
 
       final user = cred.user;
       if (user != null) {
-        // ✅ GÜVENLİK: Banned user kontrolü
+        // ✅ GÜVENLİK: Banned user ve deleted user kontrolü
         final userDoc = await _db.collection('users').doc(user.uid).get();
         if (userDoc.exists) {
           final userData = userDoc.data() ?? <String, dynamic>{};
           final banned = userData['banned'] == true;
+          final deleted = userData['deleted'] == true;
+          final isActive = userData['isActive'] != false; // Default true
+          
           if (banned) {
             await FirebaseAuth.instance.signOut();
             _setError('Hesabınız yasaklanmış. Lütfen destek ekibi ile iletişime geçin.');
+            return;
+          }
+          
+          if (deleted || !isActive) {
+            await FirebaseAuth.instance.signOut();
+            _setError('Hesabınız deaktive edilmiş. Lütfen destek ekibi ile iletişime geçin veya yeni bir hesap oluşturun.');
             return;
           }
         }
@@ -478,6 +487,9 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       }
 
       if (!mounted) return;
+      
+      // ✅ LOGIN: Normal login sonrası feed'e yönlendir
+      // (wantsExpert sadece signup'da kullanılır, login'de kullanılmaz)
       Navigator.pushReplacementNamed(context, '/feed');
     } on FirebaseAuthException catch (e) {
       String msg = e.message ?? 'Giriş başarısız.';
@@ -715,7 +727,13 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
       });
 
       if (!mounted) return;
-      Navigator.pushReplacementNamed(context, '/feed');
+      
+      // ✅ EXPERT BAŞVURUSU: Eğer expert seçtiyse, expert registration screen'e yönlendir
+      if (wantsExpert) {
+        Navigator.pushReplacementNamed(context, '/expertRegistration');
+      } else {
+        Navigator.pushReplacementNamed(context, '/feed');
+      }
     } on StateError catch (e) {
       if (e.message == 'USERNAME_TAKEN') {
         _setError('Bu kullanıcı adı zaten kullanımda.');
@@ -764,7 +782,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
             height: 34,
             width: 34,
             child: Image.asset(
-              'assets/images/psych_catalog_logo.png',
+              'assets/images/psych_catalog_logo.jpeg',
               fit: BoxFit.contain,
             ),
           ),
@@ -1217,7 +1235,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                     DropdownMenuItem(value: 'client', child: Text('Danışan')),
                     DropdownMenuItem(
                       value: 'expert',
-                      child: Text('Uzman (Onay bekler)'),
+                      child: Text('Uzman (499₺/ay - Onay bekler)'),
                     ),
                   ],
                   onChanged: _loading
@@ -1244,7 +1262,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                       border: Border.all(color: Colors.amber.withOpacity(0.35)),
                     ),
                     child: const Text(
-                      'Uzman seçimi başvuru olarak kaydedilir. Admin onaylayana kadar paylaşım/test oluşturma gibi uzman işlemleri kapalı olur.',
+                      'Uzman olmak için ücretli aylık abonelik gerekir (499₺/ay). Başvurunuz admin onayından sonra aktif olur ve aylık abonelik başlatılır.',
                       style: TextStyle(fontSize: 13),
                     ),
                   ),

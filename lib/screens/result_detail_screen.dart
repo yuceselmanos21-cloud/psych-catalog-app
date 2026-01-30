@@ -4,7 +4,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../widgets/friendly_error_widget.dart';
 import '../widgets/skeleton_loading.dart';
+import '../widgets/test_result_chart.dart';
 import '../services/expert_cache.dart';
+import '../services/analytics_service.dart';
 
 class ResultDetailScreen extends StatelessWidget {
   final String testTitle;
@@ -86,6 +88,9 @@ class ResultDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('test_result_detail');
+    
     final myUid = FirebaseAuth.instance.currentUser?.uid;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -122,6 +127,12 @@ class ResultDetailScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // ✅ Test Sonuçları Grafikleri
+                  if (questions != null && questions!.isNotEmpty && answers != null && answers!.isNotEmpty) ...[
+                    _buildTestCharts(questions!, answers!, isDark),
+                    const SizedBox(height: 30),
+                  ],
+                  
                   // Sorular ve Cevaplar Bölümü
                   if (questions != null && questions!.isNotEmpty && answers != null && answers!.isNotEmpty) ...[
                     Text(
@@ -887,6 +898,56 @@ class ResultDetailScreen extends StatelessWidget {
     return buffer.toString().toLowerCase();
   }
   
+  /// Test sonuçları için grafikleri oluştur
+  Widget _buildTestCharts(List<dynamic> questions, List<dynamic> answers, bool isDark) {
+    // Skala cevaplarını ve soru tiplerini analiz et
+    List<int> scaleAnswers = [];
+    int scaleCount = 0;
+    int textCount = 0;
+    int multipleChoiceCount = 0;
+
+    for (int i = 0; i < questions.length && i < answers.length; i++) {
+      final question = questions[i];
+      final answer = answers[i];
+
+      // Soru tipini belirle
+      String questionType = 'text';
+      if (question is Map) {
+        questionType = question['type']?.toString() ?? 'text';
+      }
+
+      // Soru tipi sayılarını güncelle
+      if (questionType == 'scale') {
+        scaleCount++;
+        if (answer is int && answer >= 1 && answer <= 5) {
+          scaleAnswers.add(answer);
+        }
+      } else if (questionType == 'multiple_choice') {
+        multipleChoiceCount++;
+      } else {
+        textCount++;
+      }
+    }
+
+    return Column(
+      children: [
+        if (scaleAnswers.isNotEmpty)
+          TestResultChart(
+            scaleAnswers: scaleAnswers,
+            isDark: isDark,
+          ),
+        const SizedBox(height: 16),
+        if (scaleCount > 0 || textCount > 0 || multipleChoiceCount > 0)
+          TestAnswerTypeChart(
+            scaleCount: scaleCount,
+            textCount: textCount,
+            multipleChoiceCount: multipleChoiceCount,
+            isDark: isDark,
+          ),
+      ],
+    );
+  }
+
   // ✅ Soru-Cevap kartı widget'ı
   Widget _buildQuestionAnswerCard(
     BuildContext context,
@@ -1143,12 +1204,28 @@ class ResultDetailScreen extends StatelessWidget {
         title: Row(
           children: [
             Expanded(
-              child: Text(
-                data['name'] ?? 'İsimsiz Uzman',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    data['name'] ?? 'İsimsiz Uzman',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  if ((data['username'] ?? '').toString().isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '@${data['username']}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.deepPurple,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
             if (isTestCreator)

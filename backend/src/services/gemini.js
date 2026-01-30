@@ -310,8 +310,27 @@ export async function analyzeTestAnswers(docId, testId, data) {
       return;
     }
     
-    // Get test document
-    const testDoc = await db.collection('tests').doc(testId).get();
+    // Get test document (with retry for connection issues)
+    let testDoc;
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        testDoc = await db.collection('tests').doc(testId).get();
+        break;
+      } catch (error) {
+        retries--;
+        if (retries === 0) {
+          throw error;
+        }
+        console.log(`⚠️ Firestore get() failed, retrying... (${retries} left)`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+    
+    if (!testDoc || !testDoc.exists) {
+      throw new Error(`Test document not found: ${testId}`);
+    }
+    
     const testData = testDoc.data();
     
     // ✅ Geliştirilmiş System Instruction (test'e özel varsa onu kullan, yoksa default)

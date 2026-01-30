@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../repositories/firestore_block_repository.dart';
+import '../services/analytics_service.dart';
 
 class ExpertsListScreen extends StatefulWidget {
   const ExpertsListScreen({super.key});
@@ -21,18 +23,32 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
         .map((snap) => snap.docs.map((d) => d.id).toSet());
   }
 
+  Stream<Set<String>> _watchBlockedIds(String currentUserId) {
+    final blockRepo = FirestoreBlockRepository();
+    return blockRepo.watchBlockedIds(currentUserId);
+  }
+
   bool _matchesSearch(Map<String, dynamic> data) {
     if (_search.isEmpty) return true;
 
     final name = (data['name'] ?? '').toString().toLowerCase();
+    final username = (data['username'] ?? '').toString().toLowerCase();
     final city = (data['city'] ?? '').toString().toLowerCase();
     final profession = (data['profession'] ?? '').toString().toLowerCase();
     final specialties = (data['specialties'] ?? '').toString().toLowerCase();
 
     return name.contains(_search) ||
+        username.contains(_search) ||
         city.contains(_search) ||
         profession.contains(_search) ||
         specialties.contains(_search);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('experts_list');
   }
 
   @override
@@ -44,7 +60,7 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
     final currentUserId = FirebaseAuth.instance.currentUser?.uid;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    Widget buildList(Set<String> followingIds) {
+    Widget buildList(Set<String> followingIds, {Set<String> blockedIds = const {}}) {
       return StreamBuilder<QuerySnapshot>(
         stream: expertsQuery.snapshots(),
         builder: (context, snapshot) {
@@ -80,7 +96,11 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
           final filtered = allDocs.where((doc) {
             final data =
                 doc.data() as Map<String, dynamic>? ?? <String, dynamic>{};
-            return _matchesSearch(data);
+            // ✅ Engellenen kullanıcıları filtrele
+            if (blockedIds.contains(doc.id)) return false;
+            // ✅ Arama filtresi
+            if (!_matchesSearch(data)) return false;
+            return true;
           }).toList();
 
           if (filtered.isEmpty) {
@@ -134,6 +154,7 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
 
               final expertId = doc.id;
               final name = data['name']?.toString() ?? 'Uzman';
+              final username = data['username']?.toString() ?? '';
               final city = data['city']?.toString() ?? 'Belirtilmemiş';
               final profession =
                   data['profession']?.toString() ?? 'Meslek belirtilmemiş';
@@ -192,13 +213,29 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
                               Row(
                                 children: [
                                   Expanded(
-                                    child: Text(
-                                      name,
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: isDark ? Colors.white : Colors.black87,
-                                      ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          name,
+                                          style: TextStyle(
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                            color: isDark ? Colors.white : Colors.black87,
+                                          ),
+                                        ),
+                                        if (username.isNotEmpty) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '@$username',
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: Colors.deepPurple,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
                                     ),
                                   ),
                                   if (isFollowing)
@@ -335,10 +372,17 @@ class _ExpertsListScreenState extends State<ExpertsListScreen> {
             child: currentUserId == null
                 ? buildList(<String>{})
                 : StreamBuilder<Set<String>>(
-              stream: _watchFollowingIds(currentUserId),
-              builder: (context, snap) {
-                final followingIds = snap.data ?? <String>{};
-                return buildList(followingIds);
+              stream: _watchBlockedIds(currentUserId),
+              builder: (context, blockedSnap) {
+                final blockedIds = blockedSnap.data ?? <String>{};
+                return StreamBuilder<Set<String>>(
+                  stream: _watchFollowingIds(currentUserId),
+                  builder: (context, followingSnap) {
+                    final followingIds = followingSnap.data ?? <String>{};
+                    // ✅ Engellenen kullanıcıları filtrele
+                    return buildList(followingIds, blockedIds: blockedIds);
+                  },
+                );
               },
             ),
           ),

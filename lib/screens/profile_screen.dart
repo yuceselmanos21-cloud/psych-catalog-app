@@ -13,6 +13,7 @@ import '../repositories/firestore_test_repository.dart';
 import '../repositories/firestore_user_repository.dart';
 import '../models/post_model.dart';
 import '../widgets/post_card.dart';
+import '../services/analytics_service.dart';
 
 // ✅ Admin Panel ekranı (yeni)
 import 'admin/admin_dashboard_screen.dart';
@@ -91,6 +92,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('profile');
     _loadUser();
   }
 
@@ -1381,6 +1384,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         '${dt.year}';
   }
 
+  // Sayı formatlama (binlik ayırıcı ile - Türkçe format: 7.093)
+  String _formatNumber(int number) {
+    final numberStr = number.toString();
+    if (numberStr.length <= 3) {
+      return numberStr;
+    }
+    
+    // Binlik ayırıcı ekle (sağdan sola)
+    final reversed = numberStr.split('').reversed.join();
+    final chunks = <String>[];
+    for (int i = 0; i < reversed.length; i += 3) {
+      final end = (i + 3 < reversed.length) ? i + 3 : reversed.length;
+      chunks.add(reversed.substring(i, end));
+    }
+    return chunks.join('.').split('').reversed.join();
+  }
+
   // ---------- UI Helpers ----------
 
   int _asInt(dynamic value) {
@@ -1645,148 +1665,292 @@ class _ProfileScreenState extends State<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Sol taraf: Profil fotoğrafı ve bilgiler
-              Flexible(
+              Expanded(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                  // Profil fotoğrafı
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white,
-                      border: Border.all(color: Colors.grey.shade300, width: 2),
+                    // Profil fotoğrafı
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white,
+                        border: Border.all(color: Colors.grey.shade300, width: 2),
+                      ),
+                      child: CircleAvatar(
+                        radius: 38,
+                        backgroundImage: photoUrl != null && photoUrl.isNotEmpty
+                            ? NetworkImage(photoUrl)
+                            : null,
+                        backgroundColor: Colors.grey.shade200,
+                        child: photoUrl == null || photoUrl.isEmpty
+                            ? Text(
+                                name.isNotEmpty ? name[0].toUpperCase() : '?',
+                                style: const TextStyle(fontSize: 28),
+                              )
+                            : null,
+                      ),
                     ),
-                    child: CircleAvatar(
-                      radius: 38,
-                      backgroundImage: photoUrl != null && photoUrl.isNotEmpty
-                          ? NetworkImage(photoUrl)
-                          : null,
-                      backgroundColor: Colors.grey.shade200,
-                      child: photoUrl == null || photoUrl.isEmpty
-                          ? Text(
-                              name.isNotEmpty ? name[0].toUpperCase() : '?',
-                              style: const TextStyle(fontSize: 28),
-                            )
-                          : null,
+                    
+                    const SizedBox(width: 12),
+                    
+                    // Bilgiler (meslek, isim+username, şehir)
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Meslek + Admin
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  profession,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.deepPurple,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (role == 'admin') ...[
+                                const SizedBox(width: 6),
+                                Text(
+                                  'admin',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.purple.shade600,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          // İsim + Username
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  name,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black87,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (username != null && username.trim().isNotEmpty) ...[
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    '@$username',
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.purple,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          // Şehir
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.location_on, size: 14, color: Colors.purple.shade400),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  city,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.purple.shade600,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          // Takipçi ve Takip edilen (Instagram benzeri)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _uid != null
+                                  ? StreamBuilder<int>(
+                                      stream: _followRepo.watchFollowingCount(_uid!),
+                                      builder: (context, snap) {
+                                        final followingCount = snap.data ?? 0;
+                                        return GestureDetector(
+                                          onTap: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => UsersListScreen(
+                                                  userId: _uid!,
+                                                  isFollowersList: false,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          child: RichText(
+                                            text: TextSpan(
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                color: Colors.grey.shade700,
+                                              ),
+                                              children: [
+                                                TextSpan(
+                                                  text: _formatNumber(followingCount),
+                                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                                ),
+                                                const TextSpan(text: ' Takip edilen'),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    )
+                                  : RichText(
+                                      text: TextSpan(
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.grey.shade700,
+                                        ),
+                                        children: [
+                                          TextSpan(
+                                            text: _formatNumber(followingFallback),
+                                            style: const TextStyle(fontWeight: FontWeight.bold),
+                                          ),
+                                          const TextSpan(text: ' Takip edilen'),
+                                        ],
+                                      ),
+                                    ),
+                              const SizedBox(width: 16),
+                              _uid != null
+                                  ? StreamBuilder<int>(
+                                      stream: _followRepo.watchFollowersCount(_uid!),
+                                      builder: (context, snap) {
+                                        final followersCount = snap.data ?? 0;
+                                        return GestureDetector(
+                                          onTap: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (_) => UsersListScreen(
+                                                  userId: _uid!,
+                                                  isFollowersList: true,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          child: RichText(
+                                            text: TextSpan(
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                color: Colors.grey.shade700,
+                                              ),
+                                              children: [
+                                                TextSpan(
+                                                  text: _formatNumber(followersCount),
+                                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                                ),
+                                                const TextSpan(text: ' Takipçi'),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    )
+                                  : RichText(
+                                      text: TextSpan(
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.grey.shade700,
+                                        ),
+                                        children: [
+                                          TextSpan(
+                                            text: _formatNumber(followersFallback),
+                                            style: const TextStyle(fontWeight: FontWeight.bold),
+                                          ),
+                                          const TextSpan(text: ' Takipçi'),
+                                        ],
+                                      ),
+                                    ),
+                          // ✅ İstatistikler: Post sayısı ve test sayısı
+                          if (_uid != null) ...[
+                            const SizedBox(width: 16),
+                            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                              stream: _postRepo.watchPostsByAuthor(_uid!, limit: 1),
+                              builder: (context, snap) {
+                                final postCount = snap.data?.docs.length ?? 0;
+                                // Gerçek sayıyı almak için count query yapalım
+                                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                                  stream: _postRepo.watchPostsByAuthor(_uid!, limit: 1000),
+                                  builder: (context, fullSnap) {
+                                    final totalPosts = fullSnap.data?.docs.length ?? 0;
+                                    return RichText(
+                                      text: TextSpan(
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.grey.shade700,
+                                        ),
+                                        children: [
+                                          TextSpan(
+                                            text: _formatNumber(totalPosts),
+                                            style: const TextStyle(fontWeight: FontWeight.bold),
+                                          ),
+                                          const TextSpan(text: ' Paylaşım'),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                );
+                              },
+                            ),
+                            if (isExpert || role == 'admin') ...[
+                              const SizedBox(width: 16),
+                              StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                                stream: _testRepo.watchTestsByCreator(_uid!),
+                                builder: (context, snap) {
+                                  final testCount = snap.data?.docs.length ?? 0;
+                                  return RichText(
+                                    text: TextSpan(
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey.shade700,
+                                      ),
+                                      children: [
+                                        TextSpan(
+                                          text: _formatNumber(testCount),
+                                          style: const TextStyle(fontWeight: FontWeight.bold),
+                                        ),
+                                        const TextSpan(text: ' Test'),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
+                          ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  
-                  const SizedBox(width: 12),
-                  
-                  // Bilgiler (meslek, isim+username, şehir)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Meslek + Admin
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            profession,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.deepPurple,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          if (role == 'admin') ...[
-                            const SizedBox(width: 6),
-                            Text(
-                              'admin',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.purple.shade600,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      // İsim + Username
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            name,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          if (username != null && username.trim().isNotEmpty) ...[
-                            const SizedBox(width: 6),
-                            Text(
-                              '@$username',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                color: Colors.purple,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      // Şehir
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.location_on, size: 14, color: Colors.purple.shade400),
-                          const SizedBox(width: 4),
-                          Text(
-                            city,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.purple.shade600,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
                   ],
                 ),
               ),
-              
-              const SizedBox(width: 16),
-              
-              // Sağ taraf: İstatistikler (ortalanmış)
-              _uid != null
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        _statMiniStream(
-                          'Takipçi',
-                          _followRepo.watchFollowersCount(_uid!),
-                          userId: _uid!,
-                          isFollowers: true,
-                        ),
-                        const SizedBox(width: 16),
-                        _statMiniStream(
-                          'Takip',
-                          _followRepo.watchFollowingCount(_uid!),
-                          userId: _uid!,
-                          isFollowers: false,
-                        ),
-                      ],
-                    )
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        _statMini('Takipçi', followersFallback),
-                        const SizedBox(width: 16),
-                        _statMini('Takip', followingFallback),
-                      ],
-                    ),
             ],
           ),
         ),
@@ -2077,6 +2241,163 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  // Takipçi ve Takip edilen (Instagram benzeri)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _uid != null
+                          ? StreamBuilder<int>(
+                              stream: _followRepo.watchFollowingCount(_uid!),
+                              builder: (context, snap) {
+                                final followingCount = snap.data ?? 0;
+                                return GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => UsersListScreen(
+                                          userId: _uid!,
+                                          isFollowersList: false,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: RichText(
+                                    text: TextSpan(
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey.shade700,
+                                      ),
+                                      children: [
+                                        TextSpan(
+                                          text: _formatNumber(followingCount),
+                                          style: const TextStyle(fontWeight: FontWeight.bold),
+                                        ),
+                                        const TextSpan(text: ' Takip edilen'),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            )
+                          : RichText(
+                              text: TextSpan(
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey.shade700,
+                                ),
+                                children: [
+                                  TextSpan(
+                                    text: _formatNumber(followingFallback),
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                  const TextSpan(text: ' Takip edilen'),
+                                ],
+                              ),
+                            ),
+                      const SizedBox(width: 16),
+                      _uid != null
+                          ? StreamBuilder<int>(
+                              stream: _followRepo.watchFollowersCount(_uid!),
+                              builder: (context, snap) {
+                                final followersCount = snap.data ?? 0;
+                                return GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => UsersListScreen(
+                                          userId: _uid!,
+                                          isFollowersList: true,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: RichText(
+                                    text: TextSpan(
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.grey.shade700,
+                                      ),
+                                      children: [
+                                        TextSpan(
+                                          text: _formatNumber(followersCount),
+                                          style: const TextStyle(fontWeight: FontWeight.bold),
+                                        ),
+                                        const TextSpan(text: ' Takipçi'),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            )
+                          : RichText(
+                              text: TextSpan(
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey.shade700,
+                                ),
+                                children: [
+                                  TextSpan(
+                                    text: _formatNumber(followersFallback),
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                  const TextSpan(text: ' Takipçi'),
+                                ],
+                              ),
+                            ),
+                      // ✅ İstatistikler: Post sayısı ve test sayısı
+                      if (_uid != null) ...[
+                        const SizedBox(width: 16),
+                        StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                          stream: _postRepo.watchPostsByAuthor(_uid!, limit: 1000),
+                          builder: (context, snap) {
+                            final totalPosts = snap.data?.docs.length ?? 0;
+                            return RichText(
+                              text: TextSpan(
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey.shade700,
+                                ),
+                                children: [
+                                  TextSpan(
+                                    text: _formatNumber(totalPosts),
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                  const TextSpan(text: ' Paylaşım'),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                        if (isExpert || role == 'admin') ...[
+                          const SizedBox(width: 16),
+                          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                            stream: _testRepo.watchTestsByCreator(_uid!),
+                            builder: (context, snap) {
+                              final testCount = snap.data?.docs.length ?? 0;
+                              return RichText(
+                                text: TextSpan(
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey.shade700,
+                                  ),
+                                  children: [
+                                    TextSpan(
+                                      text: _formatNumber(testCount),
+                                      style: const TextStyle(fontWeight: FontWeight.bold),
+                                    ),
+                                    const TextSpan(text: ' Test'),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -2134,36 +2455,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 12),
-
-            // -------- FOLLOW STATS --------
-            if (_uid != null)
-              Row(
-                children: [
-                  _statMiniStream(
-                    'Takipçi',
-                    _followRepo.watchFollowersCount(_uid!),
-                    userId: _uid!,
-                    isFollowers: true,
-                  ),
-                  const SizedBox(width: 8),
-                  _statMiniStream(
-                    'Takip',
-                    _followRepo.watchFollowingCount(_uid!),
-                    userId: _uid!,
-                    isFollowers: false,
-                  ),
-                ],
-              )
-            else
-              Row(
-                children: [
-                  _statMini('Takipçi', followersFallback),
-                  const SizedBox(width: 8),
-                  _statMini('Takip', followingFallback),
-                ],
-              ),
-
-            const SizedBox(height: 16),
 
             // -------- DÜZENLENEBİLİR BİLGİLER --------
             Card(

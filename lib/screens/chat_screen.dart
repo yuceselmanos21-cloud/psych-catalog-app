@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../repositories/firestore_chat_repository.dart';
 import '../repositories/firestore_user_repository.dart';
+import '../repositories/firestore_block_repository.dart';
+import '../services/analytics_service.dart';
 
 class ChatScreen extends StatefulWidget {
   final String chatId;
@@ -24,16 +26,53 @@ class _ChatScreenState extends State<ChatScreen> {
   final _textCtrl = TextEditingController();
   final _repo = FirestoreChatRepository();
   final _userRepo = FirestoreUserRepository();
+  final _blockRepo = FirestoreBlockRepository();
   final _myUid = FirebaseAuth.instance.currentUser?.uid;
   final ScrollController _scrollController = ScrollController();
 
   String? _otherUserPhotoUrl;
   String? _myPhotoUrl;
+  bool _isBlocked = false;
+  bool _isBlockedByOther = false;
 
   @override
   void initState() {
     super.initState();
+    // ✅ Analytics: Screen view tracking
+    AnalyticsService.logScreenView('chat');
     _loadUserPhotos();
+    _checkBlockStatus();
+  }
+
+  Future<void> _checkBlockStatus() async {
+    if (_myUid == null) return;
+    
+    try {
+      // Check if I blocked the other user
+      final blockedRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(_myUid!)
+          .collection('blocked')
+          .doc(widget.otherUserId);
+      final blockedSnap = await blockedRef.get();
+      
+      // Check if the other user blocked me
+      final blockedByRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.otherUserId)
+          .collection('blocked')
+          .doc(_myUid!);
+      final blockedBySnap = await blockedByRef.get();
+      
+      if (mounted) {
+        setState(() {
+          _isBlocked = blockedSnap.exists;
+          _isBlockedByOther = blockedBySnap.exists;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error checking block status: $e');
+    }
   }
 
   @override
@@ -65,6 +104,18 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _send() {
     if (_textCtrl.text.trim().isEmpty || _myUid == null) return;
+    
+    // ✅ Engelleme kontrolü
+    if (_isBlocked || _isBlockedByOther) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bu kullanıcıyla mesajlaşamazsınız. Engelleme durumu nedeniyle mesaj gönderilemiyor.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
     _repo.sendMessage(chatId: widget.chatId, senderId: _myUid!, text: _textCtrl.text.trim());
     _textCtrl.clear();
     
@@ -264,51 +315,73 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
-          Container(
-            decoration: BoxDecoration(
-              color: inputBg,
-              border: Border(top: BorderSide(color: borderColor, width: 1)),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: SafeArea(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _textCtrl,
-                      maxLines: null,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _send(),
-                      style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                      decoration: InputDecoration(
-                        hintText: "Mesaj yaz...",
-                        hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : Colors.grey.shade400),
-                        filled: true,
-                        fillColor: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
+          // ✅ Engelleme durumunda mesaj gönderme alanını gizle veya devre dışı bırak
+          if (_isBlocked || _isBlockedByOther)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.red.shade900.withOpacity(0.3) : Colors.red.shade50,
+                border: Border(top: BorderSide(color: borderColor, width: 1)),
+              ),
+              child: Center(
+                child: Text(
+                  _isBlocked 
+                      ? 'Bu kullanıcıyı engellediniz. Mesaj gönderemezsiniz.'
+                      : 'Bu kullanıcı sizi engellemiş. Mesaj gönderemezsiniz.',
+                  style: TextStyle(
+                    color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            )
+          else
+            Container(
+              decoration: BoxDecoration(
+                color: inputBg,
+                border: Border(top: BorderSide(color: borderColor, width: 1)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: SafeArea(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _textCtrl,
+                        maxLines: null,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _send(),
+                        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                        decoration: InputDecoration(
+                          hintText: "Mesaj yaz...",
+                          hintStyle: TextStyle(color: isDark ? Colors.grey.shade500 : Colors.grey.shade400),
+                          filled: true,
+                          fillColor: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.deepPurple,
-                      shape: BoxShape.circle,
+                    const SizedBox(width: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.deepPurple,
+                        shape: BoxShape.circle,
+                      ),
+                      child: IconButton(
+                        onPressed: _send,
+                        icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                        padding: const EdgeInsets.all(12),
+                      ),
                     ),
-                    child: IconButton(
-                      onPressed: _send,
-                      icon: const Icon(Icons.send, color: Colors.white, size: 20),
-                      padding: const EdgeInsets.all(12),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
         ],
       ),
       backgroundColor: scaffoldBg,
