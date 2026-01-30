@@ -53,13 +53,12 @@ Thumbs.db
 
 lib/analysis_secrets.dart
 
-# --- Firebase / Google secrets & local state ---
+# --- Firebase / Google secrets & local state (ASLA commit etme) ---
 tools/firebase_admin/serviceAccountKey.json
 serviceAccountKey.json
 **/serviceAccountKey.json
 **/*adminsdk*.json
-
-firebase_options.dart
+**/firebase_options.dart
 lib/firebase_options.dart
 
 google-services.json
@@ -68,3 +67,7 @@ android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
 
 .firebase/
+
+# --- Backend secrets ---
+backend/.env
+backend/.env.*
